@@ -42,7 +42,6 @@ class Measurements:
     leading_zero_samples: int
     freqs: np.ndarray  # FFT bin centres, Hz
     mid_power: np.ndarray  # mean power per bin of (L+R)/2
-    side_power: np.ndarray | None  # mean power per bin of (L-R)/2, None for mono
     band_edges: np.ndarray  # lower edges of the hole bands, Hz
     band_db: np.ndarray  # frames x bands, band energy relative to the frame's reference band, dB
     frame_ref_db: np.ndarray  # per frame, mean power in REF_BAND, dB
@@ -104,7 +103,6 @@ def measure(path: str | Path, info: FlacInfo) -> Measurements:
     band_matrix /= np.maximum(band_matrix.sum(axis=0), 1)
 
     mid_sum = np.zeros(len(freqs))
-    side_sum = np.zeros(len(freqs)) if channels >= 2 else None
     frame_count = 0
     band_rows, ref_rows = [], []
     trailing = []
@@ -156,9 +154,6 @@ def measure(path: str | Path, info: FlacInfo) -> Measurements:
                 idx = np.arange(FFT_SIZE)[None, :] + HOP * np.arange(n_frames)[:, None]
                 mid_spec = np.abs(np.fft.rfft(((left + right) / 2)[idx] * window, axis=1)) ** 2 * norm
                 mid_sum += mid_spec.sum(axis=0)
-                if side_sum is not None:
-                    side_spec = np.abs(np.fft.rfft(((left - right) / 2)[idx] * window, axis=1)) ** 2 * norm
-                    side_sum += side_spec.sum(axis=0)
                 frame_count += n_frames
                 ref = mid_spec[:, ref_bins].mean(axis=1)
                 ref_db = 10 * np.log10(ref + 1e-30)
@@ -186,7 +181,6 @@ def measure(path: str | Path, info: FlacInfo) -> Measurements:
         leading_zero_samples=leading_zero,
         freqs=freqs,
         mid_power=mid_sum / frames,
-        side_power=None if side_sum is None else side_sum / frames,
         band_edges=band_edges,
         band_db=np.concatenate(band_rows) if band_rows else np.zeros((0, len(band_edges))),
         frame_ref_db=np.concatenate(ref_rows) if ref_rows else np.zeros(0),

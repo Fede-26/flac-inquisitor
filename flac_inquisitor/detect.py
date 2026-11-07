@@ -14,20 +14,27 @@ from flac_inquisitor.flacmeta import FlacInfo, read_flac_info
 
 # Bump whenever a threshold or a check changes: stored results with an older
 # version are re-analyzed on the next scan.
-ALGO_VERSION = 1
+ALGO_VERSION = 2
 
-# Thresholds. Provisional until the calibration step; see docs/reference.
+# Thresholds, calibrated on 07/11/2026 against 58 tracks of a real library and
+# fakes made from them with LAME, AAC, Opus, Vorbis and ffmpeg's resampler
+# (scripts/calibrate.py). Numbers in the comments are from that run.
 CUTOFF_MIN_DROP_DB = 20.0  # level drop across the edge to call it a cutoff
-CUTOFF_FAKE_HZ = 19_000  # below this, a hard cutoff means a lossy source
-CUTOFF_SUSPECT_HZ = 20_500  # MP3 320 / V0 territory; real ADC filters sit higher
-# Upsampled files: resamplers roll off gradually between 20 and 26 kHz, then
-# leave only the noise floor. Compare 16-20 kHz with the loudest 1 kHz band
-# from 26 kHz up.
-HIRES_GAP_DB = 60.0
-HOLE_DROP_DB = 25.0  # band this far under its usual level counts as a hole
-HOLES_SUSPECT = 0.02
-HOLES_FAKE = 0.08
-SIDE_DROP_SUSPECT_DB = 15.0
+CUTOFF_FAKE_HZ = 19_000  # LAME 128-192 and AAC 128 cut at 16-17.5 kHz
+CUTOFF_SUSPECT_HZ = 20_500  # MP3 320 and Opus cut at 20.0-20.5 kHz; 49 of 58 originals have no hard cutoff
+# Upsampled files show the resampler's roll-off as a step between 20 and 26
+# kHz: 48 of 50 upsampled fakes stepped >= 14.5 dB, real hi-res <= 11 dB.
+HIRES_STEP_SUSPECT_DB = 12.0
+HIRES_STEP_FAKE_DB = 20.0
+HIRES_FLAT_DB = 5.0  # above 27 kHz an upsampled file is a flat noise floor
+# Isolated band holes: one 500 Hz band vanishes while both neighbours keep
+# playing, which music does not do but MP3 and Vorbis encoders do. Share of
+# loud frames with at least one such hole: originals p90 0.08%, LAME V0
+# median 1%.
+HOLE_DROP_DB = 25.0
+HOLE_NEIGHBOUR_DB = 10.0
+HOLES_SUSPECT = 0.005
+HOLES_FAKE = 0.04
 LOSSYWAV_FAKE_RATIO = 0.25
 LOSSYWAV_SUSPECT_RATIO = 0.05
 MIN_LOUD_BLOCKS = 10
@@ -108,22 +115,24 @@ def find_cutoff(freqs: np.ndarray, power: np.ndarray) -> dict:
     }
 
 
-def hires_gap(m: Measurements) -> float:
-    low = _band_mean_db(m.freqs, m.mid_power, 16_000, 20_000)
-    top = min(m.sample_rate / 2, 48_000)
-    highs = [_band_mean_db(m.freqs, m.mid_power, f, f + 1_000) for f in range(26_000, int(top) - 999, 1_000)]
-    return low - max(highs)
+def hires_step(m: Measurements) -> tuple[float, float]:
+    """Largest drop between a 2 kHz stretch and the 2 kHz above it, for edges
+    between 20 and 26 kHz, plus how flat the spectrum is from 27 kHz up."""
+    level = lambda lo, hi: _band_mean_db(m.freqs, m.mid_power, lo, hi)  # noqa: E731
+    step = max(level(c - 2_000, c) - level(c + 500, c + 2_500) for c in range(20_000, 26_001, 500))
+    top = min(m.sample_rate / 2 - 1_000, 40_000)
+    highs = [level(f, f + 1_000) for f in range(27_000, int(top), 1_000)]
+    flat = max(highs) - min(highs) if highs else float("inf")
+    return step, flat
 
 
 def hole_ratio(m: Measurements, cutoff_hz: float | None) -> tuple[float | None, int]:
-    """Share of (frame, band) cells where a high band vanishes while the
-    music around it is playing: the MP3 encoder switching bands off."""
+    """Share of loud frames where a high band vanishes while the bands on both
+    sides keep playing: the encoder giving up on that band for a moment."""
     if m.band_db.size == 0:
         return None, 0
     top = (cutoff_hz or m.sample_rate / 2) - 500
     bands = m.band_edges + 500 <= top
-    if not bands.any():
-        return None, 0
     loud = m.frame_ref_db >= np.median(m.frame_ref_db) - 10
     cells = m.band_db[loud][:, bands]
     if len(cells) < 20:
@@ -131,27 +140,13 @@ def hole_ratio(m: Measurements, cutoff_hz: float | None) -> tuple[float | None, 
     typical = np.median(cells, axis=0)
     # Bands with nothing in them (silence, very dark recordings) say nothing.
     active = typical > -80
-    if not active.any():
+    if active.sum() < 3:
         return None, 0
-    holes = cells[:, active] < typical[active] - HOLE_DROP_DB
-    return float(holes.mean()), int(active.sum())
-
-
-def side_drop(m: Measurements, cutoff_hz: float | None) -> float | None:
-    """How much the stereo difference shrinks at high frequencies compared to
-    the midrange. Joint-stereo MP3 throws most of it away above ~12 kHz."""
-    if m.side_power is None:
-        return None
-    top = min((cutoff_hz or m.sample_rate / 2) - 500, 16_000)
-    if top <= 12_500:
-        return None
-    ratio = m.side_power / (m.mid_power + 1e-30)
-    low = _band_mean_db(m.freqs, ratio, 2_000, 8_000)
-    high = _band_mean_db(m.freqs, ratio, 12_000, top)
-    # Near-mono material has no side signal to lose.
-    if low is None or high is None or low < -30:
-        return None
-    return low - high
+    cells, typical = cells[:, active], typical[active]
+    low = cells < typical - HOLE_DROP_DB
+    playing = cells >= typical - HOLE_NEIGHBOUR_DB
+    isolated = low[:, 1:-1] & playing[:, :-2] & playing[:, 2:]
+    return float(isolated.any(axis=1).mean()), int(active.sum())
 
 
 def evaluate(info: FlacInfo, m: Measurements) -> Result:
@@ -179,16 +174,22 @@ def evaluate(info: FlacInfo, m: Measurements) -> Result:
     metrics["cutoff_drop_db"] = cut["drop_db"]
     nyquist = m.sample_rate / 2
     if m.sample_rate > 48_000:
-        gap = hires_gap(m)
-        metrics["hires_gap_db"] = gap
-        if gap >= HIRES_GAP_DB:
+        step, flat = hires_step(m)
+        metrics["hires_step_db"] = step
+        metrics["hires_flat_db"] = flat
+        rate = f"{m.sample_rate / 1000:g} kHz"
+        if step >= HIRES_STEP_FAKE_DB or (step >= HIRES_STEP_SUSPECT_DB and flat <= HIRES_FLAT_DB):
             ev.append(Evidence("hires-content", "fail",
-                               f"Above 26 kHz the level is {gap:.0f} dB under the 16-20 kHz range: this "
-                               f"{m.sample_rate / 1000:g} kHz file was upsampled from CD-rate audio.",
-                               "upsampled", gap, f">= {HIRES_GAP_DB:g} dB"))
+                               f"The spectrum falls {step:.0f} dB between 20 and 26 kHz and is flat above: this "
+                               f"{rate} file was upsampled from 44.1 or 48 kHz audio.",
+                               "upsampled", step, f">= {HIRES_STEP_FAKE_DB:g} dB"))
+        elif step >= HIRES_STEP_SUSPECT_DB:
+            ev.append(Evidence("hires-content", "warn",
+                               f"The spectrum falls {step:.0f} dB between 20 and 26 kHz: this {rate} file may "
+                               "have been upsampled.", "upsampled", step, f">= {HIRES_STEP_SUSPECT_DB:g} dB"))
         else:
-            ev.append(Evidence("hires-content", "pass", f"There is real content above 26 kHz ({gap:.0f} dB under "
-                               "the 16-20 kHz range).", value=gap))
+            ev.append(Evidence("hires-content", "pass", f"Content continues smoothly above 22 kHz "
+                               f"(largest step {step:.0f} dB).", value=step))
     if cutoff is not None and cutoff < CUTOFF_FAKE_HZ:
         ev.append(Evidence("cutoff", "fail",
                            f"Hard cutoff at {cutoff / 1000:.1f} kHz (level drops {cut['drop_db']:.0f} dB): typical "
@@ -208,24 +209,15 @@ def evaluate(info: FlacInfo, m: Measurements) -> Result:
     if holes is None:
         ev.append(Evidence("hf-holes", "info", "Not enough high-frequency content to look for dropouts."))
     elif holes >= HOLES_FAKE:
-        ev.append(Evidence("hf-holes", "fail", f"High bands drop out in {holes:.1%} of loud moments: MP3-style "
-                           "band switching.", "lossy-transcode", holes, f">= {HOLES_FAKE:.0%}"))
+        ev.append(Evidence("hf-holes", "fail", f"In {holes:.1%} of loud moments a high band vanishes while its "
+                           "neighbours play on: an encoder dropping bands.", "lossy-transcode", holes,
+                           f">= {HOLES_FAKE:.1%}"))
     elif holes >= HOLES_SUSPECT:
-        ev.append(Evidence("hf-holes", "warn", f"High bands drop out in {holes:.1%} of loud moments.",
-                           "lossy-transcode", holes, f">= {HOLES_SUSPECT:.0%}"))
+        ev.append(Evidence("hf-holes", "warn", f"In {holes:.1%} of loud moments a high band vanishes while its "
+                           "neighbours play on.", "lossy-transcode", holes, f">= {HOLES_SUSPECT:.1%}"))
     else:
-        ev.append(Evidence("hf-holes", "pass", f"High bands are continuous ({holes:.1%} dropouts over {n_bands} bands).",
-                           value=holes))
-
-    # Joint stereo.
-    sd = side_drop(m, cutoff)
-    metrics["side_drop_db"] = sd
-    if sd is not None and sd >= SIDE_DROP_SUSPECT_DB:
-        ev.append(Evidence("side-channel", "warn", f"Stereo difference is {sd:.0f} dB weaker above 12 kHz than in "
-                           "the midrange: typical of joint-stereo MP3.", "lossy-transcode", sd,
-                           f">= {SIDE_DROP_SUSPECT_DB:g} dB"))
-    elif sd is not None:
-        ev.append(Evidence("side-channel", "pass", f"Stereo image holds up at high frequencies ({sd:.0f} dB).", value=sd))
+        ev.append(Evidence("hf-holes", "pass", f"High bands are continuous ({holes:.2%} of loud moments with "
+                           f"isolated dropouts, {n_bands} bands checked).", value=holes))
 
     # Bit depth.
     tz = m.block_trailing_zeros
