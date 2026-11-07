@@ -1,10 +1,10 @@
-FROM python:3.15-slim-trixie
+FROM python:3.15-alpine
 
 # ffmpeg decodes audio and draws spectrograms. It runs as an external program;
 # the integrity check hashes its output, so the flac tools are not needed.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+# Alpine rather than Debian: Debian's ffmpeg depends on SDL, Mesa and the X11
+# and Wayland stacks, about 300 MB that a headless decoder never loads.
+RUN apk add --no-cache ffmpeg
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /bin/uv
 
