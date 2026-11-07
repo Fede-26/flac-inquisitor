@@ -20,6 +20,8 @@ RUN uv sync --frozen --no-install-project
 
 COPY README.md ./
 COPY flac_inquisitor ./flac_inquisitor
+# Calibration helpers, runnable from a shell in the container.
+COPY scripts ./scripts
 RUN uv sync --frozen
 
 # The library, the quarantine and the database are mounted at run time; see
