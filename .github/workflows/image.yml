@@ -16,7 +16,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg flac
+      # The tests build their fakes with LAME, AAC and Opus through ffmpeg.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: uv sync --frozen
       - run: uv run pytest
 

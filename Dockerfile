@@ -1,9 +1,9 @@
 FROM python:3.15-slim-trixie
 
-# ffmpeg decodes audio and draws spectrograms; flac provides `flac -t` for the
-# integrity check. Both are called as external programs.
+# ffmpeg decodes audio and draws spectrograms. It runs as an external program;
+# the integrity check hashes its output, so the flac tools are not needed.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg flac \
+    && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /bin/uv
