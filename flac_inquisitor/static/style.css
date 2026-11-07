@@ -136,7 +136,11 @@ label { display: block; font-weight: 500; }
 .field + .field { margin-top: 1rem; }
 .field .help { font-size: 0.85rem; color: var(--ink-muted); }
 .field input, .field textarea { width: 100%; margin-top: 0.25rem; }
-.locked { font-size: 0.8rem; color: var(--info-fg); background: var(--info-bg); border-radius: 4px; padding: 0 0.35rem; }
+.locked { font-size: 0.8rem; font-weight: 400; color: var(--info-fg); background: var(--info-bg); border-radius: 4px; padding: 0 0.35rem; }
+/* Fields fixed by an environment variable must not look editable. */
+.field input[readonly], .field textarea[readonly] {
+  background: transparent; border-style: dashed; color: var(--ink-muted); cursor: not-allowed;
+}
 
 /* Pills */
 .pill {

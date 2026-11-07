@@ -87,3 +87,9 @@ def test_scan_refuses_folders_outside_the_library(client, folder):
 
 def test_folders_lists_two_levels(client):
     assert client.get("/api/folders").json() == ["Artist", "Artist/Album"]
+
+
+def test_settings_page_marks_fields_fixed_by_the_environment(client):
+    page = client.get("/settings").text
+    assert "Fixed by the <code>LIBRARY_PATH</code> environment variable" in page
+    assert "Fixed by the <code>WORKERS</code>" not in page

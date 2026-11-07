@@ -2,7 +2,8 @@
 {% block title %}Settings · flac-inquisitor{% endblock %}
 {% block content %}
 <h1>Settings</h1>
-<p class="muted">Values set by environment variables are shown read-only: change them in the container definition.</p>
+<p class="muted">Fields marked <span class="locked">set by environment</span> are fixed by an environment variable of the
+container and cannot be changed here: change them in the container definition.</p>
 {% set groups = [("Paths", ["library_path", "quarantine_path"]), ("Scanning", ["workers", "exclude"]),
                  ("Lidarr (optional)", ["lidarr_url", "lidarr_api_key", "lidarr_path_prefix"])] %}
 {% set by_key = {} %}{% for s in settings %}{% set _ = by_key.update({s.key: s}) %}{% endfor %}
@@ -13,7 +14,7 @@
     {% for key in keys %}{% set s = by_key[key] %}
     <div class="field">
       <label for="f-{{ key }}">{{ s.label }}
-        {% if s.locked %}<span class="locked" title="Set by the {{ s.env }} environment variable">{{ s.env }}</span>{% endif %}</label>
+        {% if s.locked %}<span class="locked">set by environment</span>{% endif %}</label>
       {% if key == "exclude" %}
       <textarea id="f-{{ key }}" name="{{ key }}" {% if s.locked %}readonly{% endif %}>{{ s.value }}</textarea>
       {% else %}
@@ -21,7 +22,8 @@
              value="{{ '' if s.secret else s.value }}" {% if s.secret and s.value %}placeholder="(saved, hidden)"{% endif %}
              {% if key == 'workers' %}min="1"{% endif %} {% if s.locked %}readonly{% endif %} autocomplete="off">
       {% endif %}
-      <div class="help">{{ s.help }}{% if not s.locked %} Environment variable: <code>{{ s.env }}</code>.{% endif %}</div>
+      <div class="help">{{ s.help }}
+        {% if s.locked %}Fixed by the <code>{{ s.env }}</code> environment variable.{% else %}Environment variable: <code>{{ s.env }}</code>.{% endif %}</div>
     </div>
     {% endfor %}
     {% if title.startswith("Lidarr") %}
@@ -39,7 +41,7 @@
 <section class="sheet" style="margin-top:1.5rem">
   <h2 style="margin-top:0">About</h2>
   <p>flac-inquisitor {{ version }}, detection algorithm version {{ algo_version }}. Data folder: <code>{{ data_path }}</code> (set by <code>DATA_PATH</code>).</p>
-  <p class="muted">Free software under the GNU GPL, version 3 or later. The container image includes ffmpeg from Debian; its source code is available from the Debian source packages.</p>
+  <p class="muted">Free software under the GNU GPL, version 3 or later. The container image includes ffmpeg from Alpine Linux; its source code is available from the Alpine package sources (aports).</p>
 </section>
 {% endblock %}
 {% block scripts %}<script>FI.settings();</script>{% endblock %}
