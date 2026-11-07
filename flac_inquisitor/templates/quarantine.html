@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% from "macros.html" import pill, tags with context %}
+{% block title %}Quarantine · flac-inquisitor{% endblock %}
+{% block content %}
+<div class="spread">
+  <h1>Quarantine</h1>
+  <div class="row">
+    <div class="toggle" role="group" aria-label="Status">
+      {% for s, label in [("quarantined", "In quarantine"), ("restored", "Restored"), ("deleted", "Deleted")] %}
+      <a href="/quarantine?status={{ s }}" {% if s == status %}aria-current="true"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </div>
+    {% if status == "quarantined" and groups %}<button data-copy-list>Copy list</button>{% endif %}
+  </div>
+</div>
+{% if status == "quarantined" %}
+<p class="muted">Albums to download again. Files stay here until you restore or delete them.</p>
+{% endif %}
+{% if scanning %}<div class="banner info">A scan is running: restoring is disabled until it ends.</div>{% endif %}
+
+{% if not groups %}
+<div class="empty sheet"><h2>Nothing here</h2>
+  <p>{% if status == "quarantined" %}Files you quarantine from the Library appear here.{% else %}No {{ status }} files.{% endif %}</p></div>
+{% endif %}
+
+{% for g in groups %}
+{% set ids = (g.tracks + g.others)|map(attribute="id")|join(",") %}
+<section class="sheet" style="margin-bottom:1rem">
+  <div class="spread">
+    <div>
+      <h2 style="margin:0">{{ g.album }}</h2>
+      <p class="muted" style="margin:0">{{ g.artist }} · <span class="mono">{{ g.album_dir }}</span>
+        {% set artist_folder = g.album_dir.split("/")[0] %}
+        {% if links.get(artist_folder) %} · <a href="{{ links[artist_folder] }}" target="_blank" rel="noopener">Open in Lidarr</a>{% endif %}</p>
+    </div>
+    {% if status == "quarantined" %}
+    <div class="row">
+      <button data-restore="{{ ids }}" {% if scanning %}disabled{% endif %}>Restore all</button>
+      <button class="danger" data-delete="{{ ids }}" data-name="{{ g.album }}">Delete all</button>
+    </div>
+    {% endif %}
+  </div>
+  <table class="cards" style="margin-top:0.75rem">
+    <thead><tr><th>Track</th><th>Verdict</th><th>Quarantined</th><th></th></tr></thead>
+    <tbody>
+    {% for t in g.tracks %}
+      <tr>
+        <td class="title-cell"><details><summary><strong>{{ t.title or t.original_path.split("/")[-1] }}</strong>
+          <div class="sub mono">{{ t.original_path }}</div></summary>
+          {% if status == "quarantined" %}<div class="spectro" style="margin-top:0.5rem"><img data-src="/api/quarantine/{{ t.id }}/spectrogram.png" alt="Spectrogram"></div>{% endif %}
+          </details></td>
+        <td data-label="Verdict">{% if t.verdict %}{{ pill(t.verdict) }} {{ tags(t.categories) }}{% endif %}</td>
+        <td data-label="Quarantined" class="muted"><time data-iso="{{ t.created_at }}">{{ t.created_at }}</time></td>
+        <td>{% if status == "quarantined" %}<div class="row">
+          <button class="small" data-restore="{{ t.id }}" {% if scanning %}disabled{% endif %}>Restore</button>
+          <button class="small danger" data-delete="{{ t.id }}" data-name="{{ (t.title or t.original_path.split('/')[-1]) }}">Delete</button></div>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if g.others %}<p class="muted" style="margin:0.5rem 0 0;font-size:0.85rem">Also moved: {{ g.others|map(attribute="original_path")|map("replace", g.album_dir ~ "/", "")|join(", ") }}</p>{% endif %}
+</section>
+{% endfor %}
+{% endblock %}
+{% block scripts %}<script>FI.quarantine();</script>{% endblock %}

@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     id INTEGER PRIMARY KEY,
     path TEXT NOT NULL UNIQUE,          -- relative to the library
     album_dir TEXT NOT NULL,            -- relative; disc folders folded into their album
+    album_key TEXT NOT NULL,            -- short stable hash of album_dir, used in URLs
     size INTEGER, mtime REAL,
     streaminfo_md5 TEXT,                -- NULL when the encoder left it empty
     audio_md5 TEXT,                     -- MD5 of the decoded audio
@@ -35,6 +36,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     missing INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS tracks_album ON tracks(album_dir);
+CREATE INDEX IF NOT EXISTS tracks_album_key ON tracks(album_key);
 CREATE INDEX IF NOT EXISTS tracks_md5 ON tracks(audio_md5);
 
 CREATE TABLE IF NOT EXISTS ignores (

@@ -1,0 +1,39 @@
+{% set CATEGORY_LABELS = {
+  "lossy-transcode": "Lossy transcode",
+  "upsampled": "Upsampled",
+  "padded-bits": "Padded bits",
+  "lossywav": "lossyWAV",
+  "corrupt": "Corrupt",
+  "not-flac": "Not FLAC",
+  "mixed-sources": "Mixed sources",
+} %}
+
+{% macro pill(verdict) -%}
+<span class="pill {{ verdict }}">{{ {"ok": "OK", "suspect": "Suspect", "fake": "Fake", "error": "Error"}[verdict] }}</span>
+{%- endmacro %}
+
+{% macro tags(categories) -%}
+{% for c in categories %}<span class="tag">{{ CATEGORY_LABELS.get(c, c) }}</span> {% endfor %}
+{%- endmacro %}
+
+{% macro khz(hz) -%}
+{% if hz is none %}<span class="muted">none</span>{% else %}{{ "%.1f"|format(hz / 1000) }} kHz{% endif %}
+{%- endmacro %}
+
+{% macro spectrogram(track, lazy=true) -%}
+{% set nyquist = (track.sample_rate or 44100) / 2 %}
+{% set cutoff = track.metrics.cutoff_hz if track.metrics else none %}
+<div class="spectro" data-nyquist="{{ nyquist }}">
+  <div class="axis" aria-hidden="true">
+    {% for f in [0, 5000, 10000, 15000, 20000, 30000, 40000, 60000, 80000] if f < nyquist %}
+    <span style="bottom: {{ 100 * f / nyquist }}%">{{ (f / 1000)|int }}k</span>
+    {% endfor %}
+  </div>
+  <img {% if lazy %}data-src{% else %}src{% endif %}="/api/tracks/{{ track.id }}/spectrogram.png"
+       alt="Spectrogram of {{ track.name }}: time left to right, frequency bottom to top up to {{ (nyquist / 1000)|round(1) }} kHz"
+       loading="lazy">
+  {% if cutoff %}
+  <div class="cutoff" style="bottom: {{ 100 * cutoff / nyquist }}%"><span>cutoff {{ "%.1f"|format(cutoff / 1000) }} kHz</span></div>
+  {% endif %}
+</div>
+{%- endmacro %}

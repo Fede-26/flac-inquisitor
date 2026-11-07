@@ -7,6 +7,7 @@ for files that were moved or renamed (same audio MD5 under a new path).
 """
 
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -33,6 +34,10 @@ def album_dir_of(rel: str) -> str:
     if DISC_DIR.match(parent.name) and parent.parent != PurePosixPath("."):
         parent = parent.parent
     return str(parent)
+
+
+def album_key_of(album_dir: str) -> str:
+    return hashlib.sha1(album_dir.encode()).hexdigest()[:12]
 
 
 def _int_prefix(values: list[str] | None) -> int | None:
@@ -108,6 +113,7 @@ def _store(conn, rel: str, values: dict) -> None:
     values = {k: (json.dumps(v) if k in db.JSON_COLUMNS and v is not None else v) for k, v in values.items()}
     values["path"] = rel
     values["album_dir"] = album_dir_of(rel)
+    values["album_key"] = album_key_of(values["album_dir"])
     values["missing"] = 0
     cols = ", ".join(values)
     marks = ", ".join("?" for _ in values)
@@ -125,10 +131,11 @@ def recompute_albums(album_dirs: set[str] | None = None) -> None:
             rows = conn.execute("SELECT id, sample_rate, bits, verdict, categories, metrics FROM tracks "
                                 "WHERE album_dir = ? AND missing = 0 AND verdict IS NOT NULL ORDER BY path",
                                 (album_dir,)).fetchall()
-            tracks = [{"format": f"{r['sample_rate']}/{r['bits']}",
-                       "cutoff_hz": json.loads(r["metrics"]).get("cutoff_hz") if r["metrics"] else None}
-                      for r in rows]
-            flagged = album_coherence(tracks)
+            # Files that are not FLAC at all have no format to compare.
+            comparable = [i for i, r in enumerate(rows) if r["sample_rate"]]
+            tracks = [{"format": f"{rows[i]['sample_rate']}/{rows[i]['bits']}",
+                       "cutoff_hz": json.loads(rows[i]["metrics"] or "{}").get("cutoff_hz")} for i in comparable]
+            flagged = {comparable[i]: ev for i, ev in album_coherence(tracks).items()}
             for i, r in enumerate(rows):
                 categories = json.loads(r["categories"] or "[]")
                 verdict = r["verdict"]

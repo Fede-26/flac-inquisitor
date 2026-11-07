@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% from "macros.html" import pill, CATEGORY_LABELS with context %}
+{% block content %}
+{% if library_error %}
+<div class="banner error">{{ library_error }} Check the volume mounts, or <a href="/settings">change the path in Settings</a>.</div>
+{% endif %}
+
+<div class="spread">
+  <h1>Dashboard</h1>
+</div>
+
+<section class="sheet stack" id="scan" data-state="{{ scan.state }}">
+  <div class="spread">
+    <div>
+      <h2 style="margin:0">Scan</h2>
+      <p class="muted" data-scan-text style="margin:0">
+        {% if scan.state == 'running' %}Scanning…
+        {% elif scan.finished_at %}Last scan finished <time data-epoch="{{ scan.finished_at }}"></time>.
+        {% elif summary.tracks %}Results from earlier scans are shown below.
+        {% else %}The library has not been scanned yet.{% endif %}
+      </p>
+    </div>
+    <div class="row">
+      <label class="row muted" style="font-weight:400"><input type="checkbox" data-full> Re-analyze everything</label>
+      <button class="primary" data-scan-start {% if library_error %}disabled{% endif %}>Scan</button>
+      <button data-scan-stop hidden>Stop</button>
+    </div>
+  </div>
+  <div data-progress hidden>
+    <progress max="1" value="0"></progress>
+    <div class="spread muted" style="font-size:0.9rem">
+      <span data-counts></span>
+      <span class="mono" data-current></span>
+    </div>
+  </div>
+  {% if scan.message %}<div class="banner error" style="margin:0">{{ scan.message }}</div>{% endif %}
+</section>
+
+{% if summary.outdated %}
+<div class="banner info" style="margin-top:1rem">
+  {{ summary.outdated }} file(s) were analyzed with an older version of the detector. The next scan re-analyzes them.
+</div>
+{% endif %}
+
+{% if summary.tracks %}
+<h2>Results</h2>
+<div class="grid">
+  <a class="sheet stat fake" href="/albums?verdict=fake">
+    <div class="value">{{ summary.by_verdict.fake }}</div><div class="label">fake tracks</div>
+  </a>
+  <a class="sheet stat suspect" href="/albums?verdict=suspect">
+    <div class="value">{{ summary.by_verdict.suspect }}</div><div class="label">suspect tracks</div>
+  </a>
+  <a class="sheet stat" href="/albums">
+    <div class="value">{{ summary.flagged_albums }}</div><div class="label">albums to review</div>
+  </a>
+  <a class="sheet stat" href="/albums?verdict=all">
+    <div class="value">{{ summary.tracks }}</div>
+    <div class="label">tracks in total{% if summary.by_verdict.error %}, {{ summary.by_verdict.error }} unreadable{% endif %}{% if summary.ignored %}, {{ summary.ignored }} ignored{% endif %}</div>
+  </a>
+</div>
+
+{% if summary.by_category %}
+<h2>By cause</h2>
+<div class="sheet">
+  <table>
+    <tbody>
+    {% for cat, n in summary.by_category.items() %}
+      <tr><td><a href="/albums?verdict=all&category={{ cat }}">{{ CATEGORY_LABELS.get(cat, cat) }}</a></td><td class="num">{{ n }} track(s)</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% elif not library_error %}
+<div class="empty">
+  <h2>Nothing scanned yet</h2>
+  <p>The scan decodes every FLAC file once and looks for signs of lossy sources, upsampling and corruption.<br>
+     Later scans only analyze new or changed files.</p>
+</div>
+{% endif %}
+
+{% if activity %}
+<h2>Recent activity</h2>
+<div class="sheet">
+  <table>
+    <tbody>
+    {% for a in activity %}
+      <tr><td class="muted" style="white-space:nowrap"><time data-iso="{{ a.at }}">{{ a.at }}</time></td><td>{{ a.message }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script>FI.dashboard();</script>{% endblock %}

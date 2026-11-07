@@ -4,15 +4,54 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}flac-inquisitor{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+  <script>
+    // Apply the saved theme before first paint to avoid a flash.
+    try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}?v={{ version }}">
 </head>
 <body>
-  <header>
-    <a class="brand" href="/">flac-inquisitor</a>
+  <header class="top">
+    <div class="top-inner">
+      <a class="brand" href="/">flac-inquisitor</a>
+      <nav aria-label="Main">
+        <a href="/" {% if nav == 'dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
+        <a href="/albums" {% if nav in ('library', 'album') %}aria-current="page"{% endif %}>Library</a>
+        <a href="/quarantine" {% if nav == 'quarantine' %}aria-current="page"{% endif %}>Quarantine</a>
+        <a href="/settings" {% if nav == 'settings' %}aria-current="page"{% endif %}>Settings</a>
+      </nav>
+      <label class="muted" style="font-weight:400">
+        <span class="visually-hidden">Theme</span>
+        <select id="theme" aria-label="Theme">
+          <option value="">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+    </div>
   </header>
   <main>
     {% block content %}{% endblock %}
   </main>
-  <footer>flac-inquisitor {{ version }}</footer>
+  <footer>flac-inquisitor {{ version }} · detection algorithm v{{ algo_version }}</footer>
+
+  <dialog id="confirm-dialog">
+    <form method="dialog">
+      <h2 data-title style="margin-top:0"></h2>
+      <div data-body></div>
+      <div data-typed hidden>
+        <label>Type <code data-expected></code> to confirm
+          <input type="text" autocomplete="off" data-input>
+        </label>
+      </div>
+      <div class="actions">
+        <button value="cancel">Cancel</button>
+        <button value="ok" class="primary" data-ok>Confirm</button>
+      </div>
+    </form>
+  </dialog>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script src="{{ url_for('static', path='app.js') }}?v={{ version }}"></script>
+  {% block scripts %}{% endblock %}
 </body>
 </html>

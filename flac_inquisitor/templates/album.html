@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% from "macros.html" import pill, tags, khz, spectrogram with context %}
+{% block title %}{{ album.album }} · flac-inquisitor{% endblock %}
+{% block content %}
+<p class="muted" style="margin-bottom:0.25rem"><a href="javascript:history.back()">← Back</a></p>
+<div class="spread">
+  <div>
+    <h1 style="margin-bottom:0.15rem">{{ album.album }}</h1>
+    <p class="muted" style="margin:0">{{ album.artist }} · <span class="mono">{{ album.album_dir }}</span></p>
+  </div>
+  <div class="row">{{ pill(album.verdict) }} {{ tags(album.categories) }}</div>
+</div>
+
+<div class="sheet" style="margin-top:1rem">
+  <p style="margin:0">{{ album.summary }}</p>
+</div>
+
+{% if scanning %}<div class="banner info" style="margin-top:1rem">A scan is running: moving files is disabled until it ends.</div>{% endif %}
+
+<div class="spread" style="margin:1.25rem 0 0.5rem">
+  <div class="row">
+    <button data-compare>Compare spectrograms</button>
+    <span class="muted" style="font-size:0.85rem"><kbd>j</kbd>/<kbd>k</kbd> move · <kbd>Enter</kbd> details · <kbd>s</kbd> spectrogram · <kbd>q</kbd> quarantine</span>
+  </div>
+  <div class="row">
+    <span class="muted" data-bulk-count></span>
+    <button data-ignore-selected disabled>Ignore selected</button>
+    <button class="danger" data-quarantine-selected disabled {% if scanning %}data-scanning{% endif %}>Quarantine selected</button>
+    <button class="danger" data-quarantine-album data-album-key="{{ album.album_key }}" {% if scanning %}disabled{% endif %}>Quarantine album</button>
+  </div>
+</div>
+
+<div class="compare sheet" data-compare-grid hidden>
+  {% for t in album.tracks %}
+  <figure><figcaption>{{ pill(t.effective_verdict) }} {{ t.name }}</figcaption>{{ spectrogram(t) }}</figure>
+  {% endfor %}
+</div>
+
+<div class="sheet" style="padding:0" data-album-key="{{ album.album_key }}">
+<table class="cards" data-selectable="track" data-tracklist>
+  <thead><tr><th class="check"><input type="checkbox" data-select-all aria-label="Select all"></th><th>Track</th><th class="num">Length</th><th>Format</th><th class="num">Cutoff</th><th>Verdict</th></tr></thead>
+  <tbody>
+  {% for t in album.tracks %}
+    <tr id="track-{{ t.id }}" data-track="{{ t.id }}" data-name="{{ t.name }}" tabindex="-1">
+      <td class="check"><input type="checkbox" value="{{ t.id }}" aria-label="Select {{ t.name }}"></td>
+      <td class="title-cell">
+        <details class="track" data-details>
+          <summary><strong>{{ t.title or t.name }}</strong>
+            <div class="sub mono">{{ t.name }}</div>
+            <div class="sub">{{ t.summary or t.error or "" }}</div></summary>
+          <div class="stack" style="margin-top:0.75rem">
+            {{ spectrogram(t) }}
+            <div class="row">
+              <audio controls preload="none" src="/api/tracks/{{ t.id }}/audio" style="max-width:100%"></audio>
+              {% if t.ignored %}
+              <button class="small" data-unignore="{{ t.id }}">Stop ignoring</button>
+              {% elif t.effective_verdict != 'ok' %}
+              <button class="small" data-ignore="{{ t.id }}">Ignore (false positive)</button>
+              {% endif %}
+            </div>
+            {% if t.evidence or t.album_evidence %}
+            <table class="evidence">
+              <thead><tr><th>Check</th><th>Result</th><th>Measured</th><th>Threshold</th><th>Explanation</th></tr></thead>
+              <tbody>
+              {% for e in (t.album_evidence or []) + (t.evidence or []) %}
+                <tr>
+                  <td class="mono">{{ e.check }}</td>
+                  <td class="result-{{ e.result }}">{{ e.result }}</td>
+                  <td class="mono">{% if e.value is number %}{{ "%.4g"|format(e.value) }}{% elif e.value %}{{ e.value }}{% endif %}</td>
+                  <td class="mono">{{ e.threshold or "" }}</td>
+                  <td>{{ e.message }}</td>
+                </tr>
+              {% endfor %}
+              </tbody>
+            </table>
+            {% endif %}
+          </div>
+        </details>
+      </td>
+      <td data-label="Length" class="num">{% if t.duration %}{{ (t.duration // 60)|int }}:{{ "%02d"|format((t.duration % 60)|int) }}{% endif %}</td>
+      <td data-label="Format" class="mono">{{ t.sample_rate }}/{{ t.bits }}</td>
+      <td data-label="Cutoff" class="num">{{ khz(t.metrics.cutoff_hz if t.metrics else none) }}</td>
+      <td data-label="Verdict">{{ pill(t.effective_verdict) }}{% if t.ignored %} <span class="tag plain">ignored</span>{% endif %}
+        <div>{{ tags(t.final_categories or []) }}</div></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<dialog id="spectro-dialog">
+  <div class="spread"><h2 style="margin:0" data-title></h2>
+    <div class="row"><button data-prev aria-label="Previous track">←</button><button data-next aria-label="Next track">→</button>
+      <form method="dialog"><button>Close</button></form></div></div>
+  <div data-body></div>
+</dialog>
+{% endblock %}
+{% block scripts %}<script>FI.album();</script>{% endblock %}

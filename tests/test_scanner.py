@@ -96,3 +96,14 @@ def test_full_rescan_ignores_cache(library):
     scan()
     status = scan(full=True)
     assert status["analyzed"] == 4
+
+
+def test_album_with_a_non_flac_file_gets_final_verdicts(library):
+    # Album coherence compares formats; a non-FLAC file has none.
+    album = library / "Artist" / "[2020] Album" / "Disc 1"
+    shutil.copy(library / "Other" / "Single" / "renamed.flac", album / "03. Renamed.flac")
+    status = scan()
+    assert status["message"] is None
+    t = tracks()
+    assert t["Artist/[2020] Album/Disc 1/03. Renamed.flac"]["final_verdict"] == "fake"
+    assert t["Artist/[2020] Album/Disc 1/01. Real.flac"]["final_verdict"] == "ok"

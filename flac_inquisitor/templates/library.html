@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% from "macros.html" import pill, tags, khz, CATEGORY_LABELS with context %}
+{% block title %}Library · flac-inquisitor{% endblock %}
+{% block content %}
+<div class="spread">
+  <h1>Library</h1>
+  <div class="toggle" role="group" aria-label="View">
+    <a href="/albums?{{ query }}" {% if not by_track %}aria-current="true"{% endif %}>Albums</a>
+    <a href="/tracks?{{ query }}" {% if by_track %}aria-current="true"{% endif %}>Tracks</a>
+  </div>
+</div>
+
+<form class="sheet filters" method="get" data-filters>
+  <fieldset class="chips" style="border:0;padding:0;margin:0">
+    <legend class="visually-hidden">Verdict</legend>
+    {% for v, label in [("fake", "Fake"), ("suspect", "Suspect"), ("error", "Unreadable"), ("ok", "OK")] %}
+    <label class="chip"><input type="checkbox" name="verdict" value="{{ v }}" {% if v in filters.verdicts %}checked{% endif %}><span>{{ label }}</span></label>
+    {% endfor %}
+  </fieldset>
+  <label>Cause
+    <select name="category">
+      <option value="">Any</option>
+      {% for c in categories %}<option value="{{ c }}" {% if c == filters.category %}selected{% endif %}>{{ CATEGORY_LABELS.get(c, c) }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Format
+    <select name="fmt">
+      <option value="">Any</option>
+      {% for f in formats %}<option value="{{ f }}" {% if f == filters.fmt %}selected{% endif %}>{{ f.replace("/", " Hz / ") }} bit</option>{% endfor %}
+    </select>
+  </label>
+  <label>Sort
+    <select name="sort">
+      {% for s, label in [("severity", "Most serious first"), ("artist", "Artist"), ("album", "Album"), ("cutoff", "Lowest cutoff")] %}
+      <option value="{{ s }}" {% if s == filters.sort %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label style="flex:1;min-width:12rem">Search
+    <input type="search" name="q" value="{{ filters.q or '' }}" placeholder="Artist, album, title or path" style="width:100%">
+  </label>
+  <button type="submit">Apply</button>
+</form>
+
+<div class="spread" style="margin:1rem 0 0.5rem">
+  <p class="muted" style="margin:0">{{ result.total }} {{ "track" if by_track else "album" }}{{ "" if result.total == 1 else "s" }}</p>
+  <div class="row" data-bulk hidden>
+    <span class="muted" data-bulk-count></span>
+    <button data-bulk-ignore>Ignore</button>
+    <button class="danger" data-bulk-quarantine>Quarantine</button>
+  </div>
+</div>
+
+{% if not result["items"] %}
+<div class="empty sheet">
+  <h2>Nothing matches</h2>
+  <p>{% if filters.verdicts == ["fake", "suspect"] and not filters.q and not filters.category %}No fake or suspect files found. Run a scan from the dashboard if you have not yet.{% else %}Try fewer filters.{% endif %}</p>
+</div>
+{% elif by_track %}
+<div class="sheet" style="padding:0">
+<table class="cards" data-selectable="track">
+  <thead><tr><th class="check"><input type="checkbox" data-select-all aria-label="Select all"></th><th>Track</th><th>Format</th><th class="num">Cutoff</th><th>Verdict</th><th>Cause</th></tr></thead>
+  <tbody>
+  {% for t in result["items"] %}
+    <tr>
+      <td class="check"><input type="checkbox" value="{{ t.id }}" aria-label="Select {{ t.name }}"></td>
+      <td class="title-cell"><a href="/albums/{{ t.album_key }}#track-{{ t.id }}">{{ t.title or t.name }}</a>
+        <div class="sub">{{ t.artist or '' }}{% if t.album %} · {{ t.album }}{% endif %}</div>
+        <div class="sub mono">{{ t.path }}</div></td>
+      <td data-label="Format" class="mono">{{ t.sample_rate }}/{{ t.bits }}</td>
+      <td data-label="Cutoff" class="num">{{ khz(t.metrics.cutoff_hz if t.metrics else none) }}</td>
+      <td data-label="Verdict">{{ pill(t.effective_verdict) }}{% if t.ignored %} <span class="tag plain">ignored</span>{% endif %}</td>
+      <td data-label="Cause">{{ tags(t.final_categories or []) }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="sheet" style="padding:0">
+<table class="cards" data-selectable="album">
+  <thead><tr><th class="check"><input type="checkbox" data-select-all aria-label="Select all"></th><th>Album</th><th class="num">Tracks</th><th>Format</th><th class="num">Lowest cutoff</th><th>Verdict</th><th>Cause</th></tr></thead>
+  <tbody>
+  {% for a in result["items"] %}
+    <tr>
+      <td class="check"><input type="checkbox" value="{{ a.album_key }}" aria-label="Select {{ a.album }}"></td>
+      <td class="title-cell"><a href="/albums/{{ a.album_key }}">{{ a.album }}</a><div class="sub">{{ a.artist }}</div></td>
+      <td data-label="Tracks" class="num">{{ a.tracks }}{% if a.fakes or a.suspects %}<div class="sub muted">{% if a.fakes %}{{ a.fakes }} fake{% endif %}{% if a.fakes and a.suspects %}, {% endif %}{% if a.suspects %}{{ a.suspects }} suspect{% endif %}</div>{% endif %}</td>
+      <td data-label="Format" class="mono">{{ a.formats|join(", ") }}</td>
+      <td data-label="Lowest cutoff" class="num">{{ khz(a.worst_cutoff) }}</td>
+      <td data-label="Verdict">{{ pill(a.verdict) }}</td>
+      <td data-label="Cause">{{ tags(a.categories) }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+{% if result.pages > 1 %}
+<nav class="pager" aria-label="Pages">
+  {% if result.page > 1 %}<a class="button" data-page="{{ result.page - 1 }}" href="#">← Previous</a>{% endif %}
+  <span class="muted">Page {{ result.page }} of {{ result.pages }}</span>
+  {% if result.page < result.pages %}<a class="button" data-page="{{ result.page + 1 }}" href="#">Next →</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script>FI.library();</script>{% endblock %}
