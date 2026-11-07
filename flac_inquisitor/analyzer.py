@@ -48,6 +48,7 @@ class Measurements:
     frame_ref_db: np.ndarray  # per frame, mean power in REF_BAND, dB
     block_trailing_zeros: np.ndarray  # per loud block, unused low bits
     block_count: int  # non-silent blocks, loud or not
+    channel_diff: float | None = None  # stereo only: share of non-silent frames where left and right differ
     cd: dict | None = None  # CD database checksums (cdverify), for CD-format files only
 
 
@@ -114,6 +115,7 @@ def measure(path: str | Path, info: FlacInfo) -> Measurements:
     leading_zero = 0
     seen_signal = False
     carry = np.zeros((0, channels), dtype=np.int32)
+    sounding = differing = 0
     cd = CDChecksums(info.total_samples) if is_cd_format(sr, bits, channels) and info.total_samples else None
 
     with tempfile.TemporaryFile() as err:
@@ -123,6 +125,11 @@ def measure(path: str | Path, info: FlacInfo) -> Measurements:
             md5.update(_pack_for_md5(native, bits))
             if cd:
                 cd.update(native)
+
+            if channels == 2:
+                audible = np.any(native != 0, axis=1)
+                sounding += int(audible.sum())
+                differing += int((native[:, 0] != native[:, 1]).sum())
 
             if not seen_signal:
                 nonzero = np.flatnonzero(np.any(native != 0, axis=1))
@@ -195,5 +202,6 @@ def measure(path: str | Path, info: FlacInfo) -> Measurements:
         frame_ref_db=np.concatenate(ref_rows) if ref_rows else np.zeros(0),
         block_trailing_zeros=np.array(trailing, dtype=np.int64),
         block_count=block_count,
+        channel_diff=differing / sounding if sounding else None,
         cd=cd_result,
     )

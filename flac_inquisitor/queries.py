@@ -7,7 +7,9 @@ positive stops showing up without losing its analysis.
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
-from flac_inquisitor import db
+import numpy as np
+
+from flac_inquisitor import db, detect
 from flac_inquisitor.detect import ALGO_VERSION
 
 VERDICTS = ("fake", "suspect", "ok", "error")
@@ -179,6 +181,7 @@ def get_album(album_key: str) -> dict | None:
         "album_key": album_key,
         "cd_verified": sum(t["cd_status"] == "verified" for t in tracks),
         "cd_checked": len(checked),
+        "cd_mismatch": sum(t["cd_status"] == "mismatch" for t in tracks),
         "album_dir": first["album_dir"],
         "artist": _artist_name(first["album_dir"], first["artist"]),
         "album": _album_name(first["album_dir"], first["album"]),
@@ -202,3 +205,60 @@ def formats() -> list[str]:
         rows = conn.execute("SELECT DISTINCT sample_rate || '/' || bits AS f FROM tracks "
                             "WHERE missing = 0 AND sample_rate IS NOT NULL ORDER BY sample_rate, bits").fetchall()
     return [r["f"] for r in rows]
+
+
+# Accuracy report. Tracks verified against the CD databases are bit-identical
+# to pressed CDs: whatever the detector says about them, they are not
+# transcodes made by whoever shared the file. They show where each threshold
+# sits against the real library.
+ACCURACY_METRICS = [
+    # key, label, unit, which tail matters, thresholds (label, value)
+    ("cutoff_hz", "Hard cutoff (tracks that have one)", "kHz", "low",
+     [("fake below", detect.CUTOFF_FAKE_HZ), ("suspect below", detect.CUTOFF_SUSPECT_HZ)]),
+    ("cutoff_drop_db", "Steepest edge found", "dB", "high", [("cutoff from", detect.CUTOFF_MIN_DROP_DB)]),
+    ("hole_ratio", "Loud moments with band holes", "%", "high",
+     [("suspect from", detect.HOLES_SUSPECT), ("fake from", detect.HOLES_FAKE)]),
+    ("blocks_with_unused_bits", "Blocks with unused low bits", "%", "high",
+     [("suspect from", detect.LOSSYWAV_SUSPECT_RATIO), ("fake from", detect.LOSSYWAV_FAKE_RATIO)]),
+    ("frame_top_hz", "Per-frame bandwidth, 10th percentile", "kHz", "low",
+     [("candidate: below", detect.FRAME_TOP_SHOWN_HZ)]),
+]
+
+
+def _quantiles(values: list[float], tail: str) -> list[tuple[str, float]]:
+    points = (0, 1, 5, 50) if tail == "low" else (50, 95, 99, 100)
+    names = {0: "min", 100: "max"}
+    return [(names.get(p, f"p{p}"), float(np.percentile(values, p))) for p in points]
+
+
+def accuracy() -> dict:
+    with db.connect() as conn:
+        rows = [db.row_to_dict(r) for r in conn.execute(
+            f"SELECT t.id, t.path, t.album_key, t.title, t.artist, t.album, t.verdict, t.summary, t.evidence, "
+            f"t.metrics, t.cd_ar, t.cd_ctdb, t.algo_version, {EFFECTIVE} AS eff {BASE} "
+            "AND t.cd_status = 'verified' AND t.verdict IS NOT NULL ORDER BY t.path")]
+    checks: dict[str, dict[str, int]] = {}
+    for r in rows:
+        for e in r["evidence"] or []:
+            if e["result"] in ("warn", "fail"):
+                counts = checks.setdefault(e["check"], {"warn": 0, "fail": 0})
+                counts[e["result"]] += 1
+    metrics = []
+    for key, label, unit, tail, thresholds in ACCURACY_METRICS:
+        values = [v for r in rows if (v := (r["metrics"] or {}).get(key)) is not None]
+        if not values:
+            continue
+        beyond = [(name, limit, sum((v < limit) if tail == "low" else (v >= limit) for v in values))
+                  for name, limit in thresholds]
+        metrics.append({"key": key, "label": label, "unit": unit, "count": len(values),
+                        "quantiles": _quantiles(values, tail), "beyond": beyond})
+    flagged = [{**r, "name": PurePosixPath(r["path"]).name} for r in rows if r["eff"] in ("fake", "suspect")]
+    return {
+        "tracks": len(rows),
+        "albums": len({r["album_key"] for r in rows}),
+        "outdated": sum(r["algo_version"] != ALGO_VERSION for r in rows),
+        "by_verdict": {v: sum(r["eff"] == v for r in rows) for v in ("ok", "suspect", "fake")},
+        "checks": sorted(checks.items(), key=lambda kv: -(kv[1]["warn"] + kv[1]["fail"])),
+        "metrics": metrics,
+        "flagged": flagged,
+    }

@@ -5,8 +5,10 @@
 <p class="muted">Fields marked <span class="locked">set by environment</span> are fixed by an environment variable of the
 container and cannot be changed here: change them in the container definition.</p>
 {% set groups = [("Paths", ["library_path", "quarantine_path"]), ("Scanning", ["workers", "exclude"]),
-                 ("CD verification", ["cd_lookup"]),
+                 ("Verdicts", ["upsampled_verdict"]), ("CD verification", ["cd_lookup"]),
                  ("Lidarr (optional)", ["lidarr_url", "lidarr_api_key", "lidarr_path_prefix"])] %}
+{% set choices = {"cd_lookup": [("true", "On"), ("false", "Off")],
+                  "upsampled_verdict": [("suspect", "Suspect"), ("fake", "Fake")]} %}
 {% set by_key = {} %}{% for s in settings %}{% set _ = by_key.update({s.key: s}) %}{% endfor %}
 <form class="stack" data-settings>
   {% for title, keys in groups %}
@@ -18,10 +20,10 @@ container and cannot be changed here: change them in the container definition.</
         {% if s.locked %}<span class="locked">set by environment</span>{% endif %}</label>
       {% if key == "exclude" %}
       <textarea id="f-{{ key }}" name="{{ key }}" {% if s.locked %}readonly{% endif %}>{{ s.value }}</textarea>
-      {% elif key == "cd_lookup" %}
+      {% elif key in choices %}
       {# A select cannot be readonly; a locked one is disabled, and values() skips it. #}
       <select id="f-{{ key }}" name="{{ key }}" {% if s.locked %}disabled{% endif %}>
-        {% for v, label in [("true", "On"), ("false", "Off")] %}<option value="{{ v }}" {% if s.value.strip().lower() == v %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        {% for v, label in choices[key] %}<option value="{{ v }}" {% if s.value.strip().lower() == v %}selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>
       {% else %}
       <input id="f-{{ key }}" name="{{ key }}" type="{{ 'password' if s.secret else ('number' if key == 'workers' else 'text') }}"

@@ -124,3 +124,43 @@ def test_tracks_show_their_verdict_while_the_scan_runs(client):
         conn.execute("UPDATE tracks SET final_verdict = NULL, final_categories = NULL")
     verdicts = sorted(t["effective_verdict"] for t in client.get("/api/tracks?verdict=all").json()["items"])
     assert verdicts == ["fake", "ok", "ok"]
+
+
+def test_accuracy_page_lists_cd_verified_tracks_flagged_anyway(client):
+    scan(client)
+    with db.connect() as conn:
+        conn.execute("UPDATE tracks SET cd_status = 'verified'")
+    report = client.get("/api/accuracy").json()
+    assert report["tracks"] == 3 and report["by_verdict"]["fake"] == 1
+    assert [t["name"] for t in report["flagged"]] == ["03. Fake.flac"]
+    assert "03. Fake.flac" in client.get("/accuracy").text
+
+
+def test_upsampled_setting_regrades_stored_verdicts(client, samples):
+    album = db.DATA_PATH.parent / "music" / "Artist" / "Album"
+    shutil.copy(samples["upsampled"], album / "04. Upsampled.flac")
+    scan(client)
+
+    def upsampled_verdict():
+        items = client.get("/api/tracks?verdict=all&category=upsampled").json()["items"]
+        return [t["effective_verdict"] for t in items]
+
+    # Default: upsampled is suspect at most.
+    assert upsampled_verdict() == ["suspect"]
+    assert client.put("/api/settings", json={"values": {"upsampled_verdict": "fake"}}).status_code == 200
+    assert upsampled_verdict() == ["fake"]
+
+
+def test_offset_search_runs_on_albums_that_do_not_match(client, monkeypatch):
+    from flac_inquisitor import cdverify
+
+    scan(client)
+    key = client.get("/api/albums").json()["items"][0]["album_key"]
+    assert client.post(f"/api/albums/{key}/offset-search").status_code == 400
+    with db.connect() as conn:
+        conn.execute("UPDATE tracks SET cd_status = 'mismatch'")
+    assert "Try other offsets" in client.get(f"/albums/{key}").text
+    monkeypatch.setattr(cdverify, "fetch", lambda url: None)
+    assert client.post(f"/api/albums/{key}/offset-search").status_code == 200
+    scanner._thread.join()
+    assert "no shift within 2939 samples matches" in client.get("/api/activity").json()[0]["message"]

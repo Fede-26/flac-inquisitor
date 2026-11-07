@@ -72,6 +72,10 @@ def samples(tmp_path_factory) -> dict[str, Path]:
     write_wav(d / "tape.wav", tape / np.abs(tape).max() * 0.7)
     out["tape"] = to_flac(d / "tape.wav", d / "tape.flac")
 
+    # Mono stored as stereo: both channels carry the same samples.
+    write_wav(d / "mono.wav", np.repeat(music[:, :1], 2, axis=1))
+    out["mono"] = to_flac(d / "mono.wav", d / "mono.flac")
+
     real = out["real"]
     out["mp3_128"] = transcode(real, d / "mp3_128.flac", ["-c:a", "libmp3lame", "-b:a", "128k"], ".mp3")
     out["mp3_320"] = transcode(real, d / "mp3_320.flac", ["-c:a", "libmp3lame", "-b:a", "320k"], ".mp3")

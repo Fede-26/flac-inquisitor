@@ -77,3 +77,31 @@ def test_album_coherence_needs_a_majority():
 
     tracks = [{"format": f, "cutoff_hz": None} for f in ("44100/16", "44100/16", "48000/24", "48000/24")]
     assert album_coherence(tracks) == {}
+
+
+def test_mono_stored_as_stereo_is_only_a_hint(samples):
+    result = verdict(samples, "mono")
+    assert result.metrics["mono"] is True
+    assert result.verdict == "ok", result.summary
+    assert verdict(samples, "real").metrics["mono"] is False
+
+
+def test_album_coherence_flags_a_mono_track_in_a_stereo_album():
+    from flac_inquisitor.detect import album_coherence
+
+    tracks = [{"format": "44100/16", "cutoff_hz": None, "mono": False} for _ in range(4)]
+    tracks[1]["mono"] = True
+    flagged = album_coherence(tracks)
+    assert set(flagged) == {1} and flagged[1].category == "fake-stereo"
+    # A mono album is a mono recording, not a fake.
+    assert album_coherence([{**t, "mono": True} for t in tracks]) == {}
+
+
+def test_soft_categories_make_a_file_suspect_at_most():
+    from flac_inquisitor.detect import grade
+
+    upsampled = [("fail", "upsampled"), ("pass", None)]
+    assert grade(upsampled) == "fake"
+    assert grade(upsampled, frozenset({"upsampled"})) == "suspect"
+    # Another cause still counts in full.
+    assert grade(upsampled + [("fail", "lossy-transcode")], frozenset({"upsampled"})) == "fake"

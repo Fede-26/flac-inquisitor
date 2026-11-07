@@ -21,6 +21,7 @@
         <a href="/" {% if nav == 'dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
         <a href="/albums" {% if nav in ('library', 'album') %}aria-current="page"{% endif %}>Library</a>
         <a href="/quarantine" {% if nav == 'quarantine' %}aria-current="page"{% endif %}>Quarantine</a>
+        <a href="/accuracy" {% if nav == 'accuracy' %}aria-current="page"{% endif %}>Accuracy</a>
         <a href="/settings" {% if nav == 'settings' %}aria-current="page"{% endif %}>Settings</a>
       </nav>
       <label class="muted" style="font-weight:400">

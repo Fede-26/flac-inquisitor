@@ -26,6 +26,10 @@
   <div class="row">
     <label class="row muted" style="font-weight:400"><input type="checkbox" data-rescan-full> Re-analyze</label>
     <button data-rescan data-album-dir="{{ album.album_dir }}" {% if scanning %}disabled{% endif %}>Rescan album</button>
+    {% if album.cd_mismatch %}
+    <button data-offset-search data-album-key="{{ album.album_key }}" {% if scanning %}disabled{% endif %}
+            title="Reads the album again and tries drive offsets up to 2939 samples either way, as CUETools does">Try other offsets</button>
+    {% endif %}
     <span class="muted" data-bulk-count></span>
     <button data-ignore-selected disabled>Ignore selected</button>
     <button class="danger" data-quarantine-selected disabled {% if scanning %}data-scanning{% endif %}>Quarantine selected</button>

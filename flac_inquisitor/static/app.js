@@ -169,8 +169,8 @@ const FI = (() => {
   }
 
   // Folder search for the scan form. Every word typed must appear in the
-  // path, ignoring case and accents, so "toho vol 3" finds
-  // "A-One/[2011] TOHO EUROBEAT VOL.3 …".
+  // path, ignoring case and accents, so "beatles abbey" finds
+  // "The Beatles/[1969] Abbey Road".
   function folderSearch(combo) {
     const input = $("input", combo);
     const list = $("ul", combo);
@@ -414,6 +414,19 @@ const FI = (() => {
         const { data } = await api("GET", "/api/scan");
         rescan.textContent = data.phase === "checking CDs" ? "Checking CD databases…"
           : `Scanning… ${data.done}/${data.total}`;
+        if (data.state === "idle") { clearInterval(timer); location.reload(); }
+      }, 1000);
+    });
+
+    const offsets = $("[data-offset-search]");
+    if (offsets) offsets.addEventListener("click", async () => {
+      try {
+        await api("POST", `/api/albums/${offsets.dataset.albumKey}/offset-search`);
+      } catch (e) { toast(e.message, { error: true }); return; }
+      offsets.disabled = rescan.disabled = true;
+      const timer = setInterval(async () => {
+        const { data } = await api("GET", "/api/scan");
+        offsets.textContent = `Reading tracks… ${data.cd_done}/${data.cd_total || "?"}`;
         if (data.state === "idle") { clearInterval(timer); location.reload(); }
       }, 1000);
     });

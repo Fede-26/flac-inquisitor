@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS tracks (
     missing INTEGER NOT NULL DEFAULT 0,
     cd_status TEXT,                     -- verified | mismatch | not-found | unsupported, NULL if not checked
     cd_ar INTEGER,                      -- AccurateRip confidence of the match
-    cd_ctdb INTEGER                     -- CTDB confidence of the match
+    cd_ctdb INTEGER,                    -- CTDB confidence of the match
+    cd_offset INTEGER                   -- shift in samples that made the match, from an offset search
 );
 CREATE INDEX IF NOT EXISTS tracks_album ON tracks(album_dir);
 CREATE INDEX IF NOT EXISTS tracks_album_key ON tracks(album_key);
@@ -82,7 +83,7 @@ CREATE TABLE IF NOT EXISTS cd_lookups (
 """
 
 # Columns added after the first release, for databases created before them.
-ADDED_COLUMNS = {"tracks": ["cd_status TEXT", "cd_ar INTEGER", "cd_ctdb INTEGER"]}
+ADDED_COLUMNS = {"tracks": ["cd_status TEXT", "cd_ar INTEGER", "cd_ctdb INTEGER", "cd_offset INTEGER"]}
 
 JSON_COLUMNS = ("categories", "evidence", "metrics", "album_evidence", "final_categories")
 

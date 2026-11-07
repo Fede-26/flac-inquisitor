@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from flac_inquisitor import __version__, db, lidarr, queries, quarantine, settings, spectrogram
 from flac_inquisitor.detect import ALGO_VERSION
-from flac_inquisitor.scanner import scanner
+from flac_inquisitor.scanner import regrade_if_changed, scanner
 
 HERE = Path(__file__).parent
 
@@ -18,6 +18,7 @@ HERE = Path(__file__).parent
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init()
+    regrade_if_changed()
     yield
     scanner.stop()
 
@@ -90,6 +91,11 @@ def quarantine_page(request: Request, status: str = "quarantined"):
                 links=lidarr.artist_links() if status == "quarantined" else {}, scanning=scanner.running)
 
 
+@app.get("/accuracy", response_class=HTMLResponse)
+def accuracy_page(request: Request):
+    return page(request, "accuracy.html", report=queries.accuracy())
+
+
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request):
     return page(request, "settings.html", settings=settings.describe(), data_path=str(db.DATA_PATH))
@@ -158,6 +164,11 @@ def api_summary() -> dict:
     return queries.summary()
 
 
+@app.get("/api/accuracy")
+def api_accuracy() -> dict:
+    return queries.accuracy()
+
+
 @app.get("/api/albums")
 def api_albums(verdict: list[str] | None = Query(None), category: str | None = None, fmt: str | None = None,
                q: str | None = None, cd: str | None = None, sort: str = "severity",
@@ -171,6 +182,18 @@ def api_album(album_key: str) -> dict:
     if album is None:
         raise HTTPException(404, "Album not found.")
     return album
+
+
+@app.post("/api/albums/{album_key}/offset-search")
+def api_offset_search(album_key: str) -> dict:
+    album = queries.get_album(album_key)
+    if album is None:
+        raise HTTPException(404, "Album not found.")
+    if not album["cd_mismatch"]:
+        raise HTTPException(400, "No disc of this album is known to the CD databases without matching.")
+    if not scanner.start_offset_search(album["album_dir"]):
+        raise HTTPException(409, "A scan is already running.")
+    return scanner.status()
 
 
 @app.get("/api/tracks")
@@ -360,6 +383,7 @@ def api_settings_save(body: SettingsUpdate) -> dict:
     except (KeyError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
     db.log("settings", "Settings saved.")
+    regrade_if_changed()
     return report
 
 

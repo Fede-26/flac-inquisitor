@@ -10,8 +10,8 @@ Checksums are collected per track while the analyzer decodes it, so the check
 needs no second decode. They are kept in pieces (see CDChecksums) because the
 values the databases expect depend on where the track sits on the disc.
 
-Only offset-corrected rips can match: neither database is searched for other
-offsets. Hidden track one audio and data tracks (enhanced CDs) are not
+Scans only match offset-corrected rips; the offset search (on request, per
+album) finds the others. Hidden track one audio and data tracks (enhanced CDs) are not
 supported; such discs are not found.
 
 AccurateRip formulas follow the cdtoc Rust crate and the flaccuraterip Haskell
@@ -21,16 +21,18 @@ CUETools.CTDB/CUEToolsDB.cs).
 
 import json
 import re
+import subprocess
 import time
 import urllib.error
 import urllib.request
 import zlib
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
-from flac_inquisitor import __version__, db
+from flac_inquisitor import __version__, db, settings
 
 SECTOR = 588  # stereo samples per CD sector
 AR_SKIP = 5 * SECTOR  # AccurateRip ignores 5 sectors at each end of the disc
@@ -337,14 +339,20 @@ def verify_albums(album_dirs: set[str] | None, should_stop: Callable[[], bool],
         progress(album_dir, i, len(album_dirs))
         with db.connect() as conn:
             rows = [db.row_to_dict(r) for r in conn.execute(
-                "SELECT id, path, disc, track, sample_rate, bits, channels, metrics FROM tracks "
-                "WHERE album_dir = ? AND missing = 0", (album_dir,))]
+                "SELECT id, path, disc, track, sample_rate, bits, channels, metrics, cd_status, cd_offset "
+                "FROM tracks WHERE album_dir = ? AND missing = 0", (album_dir,))]
         discs: dict[int, list[dict]] = {}
         for r in rows:
             discs.setdefault(r["disc"] or 1, []).append(r)
         updates = []
         for disc_no, tracks in discs.items():
             tracks.sort(key=lambda r: (r["track"] or 0, r["path"]))
+            if all(r["cd_offset"] is not None for r in tracks):
+                # An offset search matched this disc; a lookup at offset 0
+                # would only undo it.
+                for r in tracks:
+                    counts[r["cd_status"]] += 1
+                continue
             cds = [(r["metrics"] or {}).get("cd") for r in tracks]
             if not all(cds) or not all(is_cd_format(r["sample_rate"], r["bits"], r["channels"]) for r in tracks):
                 results = [{"status": "unsupported", "ar": None, "ctdb": None}] * len(tracks)
@@ -361,3 +369,207 @@ def verify_albums(album_dirs: set[str] | None, should_stop: Callable[[], bool],
         with db.connect() as conn:
             conn.executemany("UPDATE tracks SET cd_status = ?, cd_ar = ?, cd_ctdb = ? WHERE id = ?", updates)
     return {"counts": counts, "error": first_error}
+
+
+
+# Offset search. A rip not corrected for the drive's read offset holds the
+# right audio shifted by a few hundred samples, and matches nothing at offset
+# 0. Sliding the track windows over the disc and recomputing the checksums
+# finds such rips, as CUETools does. It needs the audio again, so it runs on
+# request for one album, not during scans. Tracks are decoded one at a time,
+# keeping only the edges of their neighbours: a whole disc would take up to
+# 850 MB.
+
+OFFSET_RANGE = AR_SKIP - 1  # samples either way, as far as CUETools looks
+CHUNK = 1 << 20
+
+
+def _decode_words(path: Path) -> np.ndarray:
+    """The track as AccurateRip words (left | right << 16), one per frame."""
+    cmd = ["ffmpeg", "-nostdin", "-v", "error", "-i", str(path), "-map", "0:a:0", "-f", "s16le", "-"]
+    pcm = subprocess.run(cmd, capture_output=True, check=True).stdout
+    return np.frombuffer(pcm[: len(pcm) - len(pcm) % 4], dtype="<u4")
+
+
+def _prefix_crcs(data: memoryview, start: int, count: int) -> list[int]:
+    """CRC-32 of the first 4 * x bytes, for x = start .. start + count - 1."""
+    crc = zlib.crc32(data[: 4 * start])
+    out = [crc]
+    for x in range(start, start + count - 1):
+        crc = zlib.crc32(data[4 * x : 4 * x + 4], crc)
+        out.append(crc)
+    return out
+
+
+def _wrapped_sums(ext: np.ndarray, lo: int, hi: int) -> tuple[int, int]:
+    """Sums of word[j] and j * word[j] over [lo, hi), modulo 2**64, in chunks
+    so a long track needs no 64-bit copy of itself."""
+    a = b = 0
+    for start in range(lo, hi, CHUNK):
+        x = ext[start : min(start + CHUNK, hi)].astype(np.uint64)
+        a += int(x.sum())
+        b += int((np.arange(start, start + len(x), dtype=np.uint64) * x).sum())
+    return a % 2**64, b % 2**64
+
+
+def _edge_sums(ext: np.ndarray, at: int, count: int) -> tuple[np.ndarray, np.ndarray]:
+    """Running sums of word[j] and j * word[j] from j = at, with a leading 0."""
+    x = ext[at : at + count - 1].astype(np.uint64)
+    j = np.arange(at, at + len(x), dtype=np.uint64)
+    zero = np.zeros(1, np.uint64)
+    return np.concatenate([zero, np.cumsum(x)]), np.concatenate([zero, np.cumsum(j * x)])
+
+
+def track_shifts(ext: np.ndarray, r: int, first: bool, last: bool, tail_sectors: int) -> dict:
+    """AccurateRip v1 and CTDB checksums of one track for every shift from -r
+    to r. ext is the track with r frames of its neighbours on each side
+    (silence before the disc and after it). Shift s reads the frames the rip
+    holds s later."""
+    n = len(ext) - 2 * r
+    count = 2 * r + 1
+    p = np.arange(count, dtype=np.uint64)  # window start in ext
+
+    # v1 = sum of (k + 1) * word[start + k] = B - (start - 1) * A, where A and
+    # B are sums of word[j] and j * word[j] over the window. Moving the
+    # window adds frames at its end and drops them at its start, so only the
+    # edges need running sums. uint64 wraps modulo 2**64, which keeps the
+    # result right modulo 2**32.
+    lo = AR_SKIP - 1 if first else 0
+    hi = n - AR_SKIP if last else n
+    a0, b0 = _wrapped_sums(ext, lo, hi)
+    add_a, add_b = _edge_sums(ext, hi, count)
+    drop_a, drop_b = _edge_sums(ext, lo, count)
+    a = np.uint64(a0) + add_a - drop_a
+    b = np.uint64(b0) + add_b - drop_b
+    v1 = (b - (p - np.uint64(1)) * a) & np.uint64(MASK)
+
+    # CTDB: the CRC of a range follows from the CRCs of the two prefixes
+    # that end where it starts and ends.
+    data = memoryview(ext).cast("B")
+    lo = CTDB_HEAD if first else 0
+    hi = n - tail_sectors * SECTOR if last else n
+    starts = _prefix_crcs(data, lo, count)
+    ends = _prefix_crcs(data, hi, count)
+    ctdb = [end ^ zlib.crc32_combine(start, 0, 4 * (hi - lo)) for start, end in zip(starts, ends)]
+    return {"ar_v1": [int(x) for x in v1], "ctdb": ctdb, "ctdb_len": hi - lo}
+
+
+def ar_at(ext: np.ndarray, r: int, shift: int, first: bool, last: bool) -> tuple[int, int]:
+    """AccurateRip v1 and v2 of one track at one shift (layout as in
+    track_shifts)."""
+    n = len(ext) - 2 * r
+    lo = AR_SKIP - 1 if first else 0
+    hi = n - AR_SKIP if last else n
+    v1 = v2 = 0
+    for start in range(lo, hi, CHUNK):
+        k = np.arange(start, min(start + CHUNK, hi), dtype=np.uint64)
+        prod = (k + np.uint64(1)) * ext[r + shift + start : r + shift + start + len(k)].astype(np.uint64)
+        v1 += int(prod.sum())
+        v2 += int(((prod & np.uint64(MASK)) + (prod >> np.uint64(32))).sum())
+    return v1 & MASK, v2 & MASK
+
+
+def _extended(paths: list[Path], r: int):
+    """Yield each track with r frames of its neighbours on each side."""
+    silence = np.zeros(r, np.uint32)
+    prev, cur = silence, _decode_words(paths[0])
+    for i in range(len(paths)):
+        nxt = _decode_words(paths[i + 1]) if i + 1 < len(paths) else None
+        yield np.concatenate([prev, cur, nxt[:r] if nxt is not None else silence])
+        prev, cur = cur[-r:], nxt
+
+
+def best_offset(paths: list[Path], total: int, ar: list[dict[int, int]] | None, entries: list[dict],
+                should_stop: Callable[[], bool], progress: Callable[[str, int, int], None],
+                r: int = OFFSET_RANGE) -> dict | None:
+    """The shift that matches the most tracks, with per-track confidences.
+    total: frames on the disc. None when no shift matches a single track, or
+    when stopped."""
+    n = len(paths)
+    tail_sectors = 10 + (total % CTDB_STRIDE) // SECTOR
+    sums = []
+    for i, ext in enumerate(_extended(paths, r)):
+        if should_stop():
+            return None
+        progress(str(paths[i]), i, n)
+        sums.append(track_shifts(ext, r, i == 0, i == n - 1, tail_sectors))
+
+    best = None
+    for k, shift in enumerate(range(-r, r + 1)):
+        conf_ar = [ar[i].get(sums[i]["ar_v1"][k], 0) if ar else 0 for i in range(n)]
+        conf_ct = [0] * n
+        disc = sums[0]["ctdb"][k]
+        for i in range(1, n):
+            disc = zlib.crc32_combine(disc, sums[i]["ctdb"][k], 4 * sums[i]["ctdb_len"])
+        for e in entries:
+            for i in range(n):
+                if e["crc32"] == disc or (len(e["trackcrcs"]) == n and e["trackcrcs"][i] == sums[i]["ctdb"][k]):
+                    conf_ct[i] += e["confidence"]
+        matched = sum(1 for a, c in zip(conf_ar, conf_ct) if a or c)
+        score = (matched, sum(conf_ar) + sum(conf_ct), -abs(shift))
+        if matched and (best is None or score > best["score"]):
+            best = {"score": score, "shift": shift, "ar": conf_ar, "ctdb": conf_ct}
+    if best is None or not ar:
+        return best
+    # Sliding works for v1 only. Where v1 found nothing at the chosen shift,
+    # the track is read again for v2, which newer AccurateRip entries use.
+    for i, ext in enumerate(_extended(paths, r)):
+        if not best["ar"][i] and not should_stop():
+            v1, v2 = ar_at(ext, r, best["shift"], i == 0, i == n - 1)
+            best["ar"][i] = ar[i].get(v1) or ar[i].get(v2) or 0
+    return best
+
+
+def _known(toc: Toc, n: int) -> tuple[list[dict[int, int]] | None, list[dict]]:
+    """What both databases hold for a layout: AccurateRip CRCs per track
+    (None if unknown) and the CTDB entries with the same audio length."""
+    data = fetch(accuraterip_url(toc))
+    xml = fetch(ctdb_url(toc))
+    audio = toc.leadout - toc.offsets[0]
+    entries = []
+    for e in parse_ctdb(xml) if xml else []:
+        fields = [int(x.lstrip("-")) for x in e["toc"].split(":")]
+        if fields[-1] - fields[0] == audio:
+            entries.append(e)
+    return (parse_dbar(data, n) if data else None), entries
+
+
+def search_offsets(album_dir: str, should_stop: Callable[[], bool],
+                   progress: Callable[[str, int, int], None]) -> list[dict]:
+    """Offset search for the discs of an album that the databases know but
+    did not match. Stores the result per track; returns one entry per disc."""
+    with db.connect() as conn:
+        rows = [db.row_to_dict(r) for r in conn.execute(
+            "SELECT id, path, disc, track, metrics, cd_status FROM tracks WHERE album_dir = ? AND missing = 0",
+            (album_dir,))]
+    discs: dict[int, list[dict]] = {}
+    for r in rows:
+        discs.setdefault(r["disc"] or 1, []).append(r)
+    root = Path(settings.get("library_path"))
+    report = []
+    for disc_no, tracks in sorted(discs.items()):
+        if not any(r["cd_status"] == "mismatch" for r in tracks):
+            continue
+        tracks.sort(key=lambda r: (r["track"] or 0, r["path"]))
+        cds = [(r["metrics"] or {}).get("cd") for r in tracks]
+        lengths = [cd["samples"] for cd in cds]
+        ar, entries = _known(toc_from_lengths(lengths), len(tracks))
+        if ar is None and not entries and cds[0].get("mb_release"):
+            for toc in musicbrainz_tocs(cds[0]["mb_release"], disc_no, lengths):
+                ar, entries = _known(toc, len(tracks))
+                if ar is not None or entries:
+                    break
+        found = best_offset([root / r["path"] for r in tracks], sum(lengths), ar, entries, should_stop, progress)
+        if should_stop():
+            break
+        if found is None:
+            report.append({"disc": disc_no, "shift": None, "verified": 0, "tracks": len(tracks)})
+            continue
+        updates = [("verified" if a or c else "mismatch", a or None, c or None, found["shift"], r["id"])
+                   for r, a, c in zip(tracks, found["ar"], found["ctdb"])]
+        with db.connect() as conn:
+            conn.executemany("UPDATE tracks SET cd_status = ?, cd_ar = ?, cd_ctdb = ?, cd_offset = ? WHERE id = ?",
+                             updates)
+        report.append({"disc": disc_no, "shift": found["shift"], "tracks": len(tracks),
+                       "verified": sum(u[0] == "verified" for u in updates)})
+    return report

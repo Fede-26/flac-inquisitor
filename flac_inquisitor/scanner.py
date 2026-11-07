@@ -18,7 +18,7 @@ from pathlib import Path, PurePosixPath
 
 from flac_inquisitor import cdverify, db, settings
 from flac_inquisitor.analyzer import measure
-from flac_inquisitor.detect import ALGO_VERSION, album_coherence, evaluate
+from flac_inquisitor.detect import ALGO_VERSION, album_coherence, evaluate, grade
 from flac_inquisitor.flacmeta import FlacInfo, NotFlacError, read_flac_info
 
 DISC_DIR = re.compile(r"^(disc|disk|cd)\s*\d+\b", re.IGNORECASE)
@@ -72,8 +72,9 @@ def _sniff(path: Path) -> str:
     return "an unknown format"
 
 
-def analyze_track(path: str) -> dict:
-    """Runs in a worker process. Returns the columns to store."""
+def analyze_track(path: str, soft: frozenset[str] = frozenset()) -> dict:
+    """Runs in a worker process. Returns the columns to store. soft comes from
+    the caller: a worker started with spawn cannot read the settings."""
     p = Path(path)
     try:
         info = read_flac_info(p)
@@ -85,7 +86,7 @@ def analyze_track(path: str) -> dict:
                 "evidence": evidence, "metrics": {}, "audio_md5": None, "error": None}
     try:
         m = measure(p, info)
-        result = evaluate(info, m)
+        result = evaluate(info, m, soft)
     except Exception as exc:  # a broken file must not stop the scan
         return {**tag_columns(info), "error": f"{type(exc).__name__}: {exc}", "verdict": None}
     d = result.to_dict()
@@ -126,31 +127,45 @@ def _store(conn, rel: str, values: dict) -> None:
 
 
 def recompute_albums(album_dirs: set[str] | None = None) -> None:
-    """Album coherence plus the final verdict of every track."""
+    """Album coherence plus the final verdict of every track. The track's own
+    verdict is graded again from its evidence, so it follows the settings."""
+    soft = settings.soft_categories()
     with db.connect() as conn:
         if album_dirs is None:
             album_dirs = {r[0] for r in conn.execute("SELECT DISTINCT album_dir FROM tracks WHERE missing = 0")}
         for album_dir in album_dirs:
-            rows = conn.execute("SELECT id, sample_rate, bits, verdict, categories, metrics FROM tracks "
+            rows = conn.execute("SELECT id, sample_rate, bits, verdict, categories, evidence, metrics FROM tracks "
                                 "WHERE album_dir = ? AND missing = 0 AND verdict IS NOT NULL ORDER BY path",
                                 (album_dir,)).fetchall()
             # Files that are not FLAC at all have no format to compare.
             comparable = [i for i, r in enumerate(rows) if r["sample_rate"]]
-            tracks = [{"format": f"{rows[i]['sample_rate']}/{rows[i]['bits']}",
-                       "cutoff_hz": json.loads(rows[i]["metrics"] or "{}").get("cutoff_hz")} for i in comparable]
+            metrics = [json.loads(rows[i]["metrics"] or "{}") for i in comparable]
+            tracks = [{"format": f"{rows[i]['sample_rate']}/{rows[i]['bits']}", "cutoff_hz": m.get("cutoff_hz"),
+                       "mono": m.get("mono")} for i, m in zip(comparable, metrics)]
             flagged = {comparable[i]: ev for i, ev in album_coherence(tracks).items()}
             for i, r in enumerate(rows):
                 categories = json.loads(r["categories"] or "[]")
-                verdict = r["verdict"]
+                own = grade([(e["result"], e.get("category")) for e in json.loads(r["evidence"] or "[]")], soft)
+                verdict = own
                 album_ev = flagged.get(i)
                 if album_ev:
                     categories = sorted(set(categories) | {album_ev.category})
                     if verdict == "ok":
                         verdict = "suspect"
-                conn.execute("UPDATE tracks SET album_evidence = ?, final_verdict = ?, final_categories = ? "
-                             "WHERE id = ?",
-                             (json.dumps([album_ev.__dict__]) if album_ev else None, verdict,
+                conn.execute("UPDATE tracks SET verdict = ?, album_evidence = ?, final_verdict = ?, "
+                             "final_categories = ? WHERE id = ?",
+                             (own, json.dumps([album_ev.__dict__]) if album_ev else None, verdict,
                               json.dumps(categories), r["id"]))
+
+
+def regrade_if_changed() -> None:
+    """Verdicts depend on the upsampled setting. When it changed since the
+    verdicts were last graded (Settings page, or the environment between two
+    starts), grade every track again: no decoding, only stored evidence."""
+    current = settings.get("upsampled_verdict").strip().lower()
+    if db.get_setting("graded_upsampled_verdict") != current:
+        recompute_albums()
+        db.set_setting("graded_upsampled_verdict", current)
 
 
 class Scanner:
@@ -188,13 +203,22 @@ class Scanner:
 
     def start(self, full: bool = False, folder: str | None = None) -> bool:
         """folder: a library-relative folder to scan instead of the whole library."""
+        return self._launch(self._scan, (full, folder), folder, "analyzing")
+
+    def start_offset_search(self, album_dir: str) -> bool:
+        """Look for a drive offset that makes the album match the CD databases."""
+        return self._launch(self._search_offsets, (album_dir,), album_dir, "searching offsets")
+
+    def _launch(self, job, args: tuple, folder: str | None, phase: str) -> bool:
+        # One job at a time: scans and offset searches both read the whole
+        # album and write its results.
         if self.running:
             return False
         self._stop.clear()
         self._update(state="running", total=0, done=0, cached=0, analyzed=0, errors=0, current=None,
-                     started_at=time.time(), finished_at=None, message=None, folder=folder, phase="analyzing",
+                     started_at=time.time(), finished_at=None, message=None, folder=folder, phase=phase,
                      cd_done=0, cd_total=0)
-        self._thread = threading.Thread(target=self._run, args=(full, folder), daemon=True)
+        self._thread = threading.Thread(target=self._run, args=(job, args), daemon=True)
         self._thread.start()
         return True
 
@@ -203,12 +227,12 @@ class Scanner:
             self._stop.set()
             self._update(state="stopping")
 
-    def _run(self, full: bool, folder: str | None) -> None:
+    def _run(self, job, args: tuple) -> None:
         try:
-            self._scan(full, folder)
+            job(*args)
         except Exception as exc:
             self._update(message=f"{type(exc).__name__}: {exc}")
-            db.log("scan", f"Scan failed: {exc}")
+            db.log("scan", f"{'Scan' if job == self._scan else 'Offset search'} failed: {exc}")
         finally:
             self._update(state="idle", current=None, phase=None, finished_at=time.time())
 
@@ -261,8 +285,9 @@ class Scanner:
                 todo.append((rel, stamp))
 
         workers = max(1, int(settings.get("workers") or 1))
+        soft = settings.soft_categories()
         with ProcessPoolExecutor(workers) as pool:
-            futures = {pool.submit(analyze_track, str(root / rel)): (rel, stamp) for rel, stamp in todo}
+            futures = {pool.submit(analyze_track, str(root / rel), soft): (rel, stamp) for rel, stamp in todo}
             for future in as_completed(futures):
                 rel, stamp = futures[future]
                 if self._stop.is_set():
@@ -270,7 +295,8 @@ class Scanner:
                     break
                 values = future.result()
                 with db.connect() as conn:
-                    _store(conn, rel, {**values, **stamp, "algo_version": ALGO_VERSION, "analyzed_at": db.now()})
+                    _store(conn, rel, {**values, **stamp, "algo_version": ALGO_VERSION, "analyzed_at": db.now(),
+                                       "cd_offset": None})
                 self._bump("errors" if values.get("error") else "analyzed", rel)
 
         stopped = self._stop.is_set()
@@ -304,6 +330,22 @@ class Scanner:
         if c["failed"]:
             message += f" {c['failed']} discs not checked: {report['error']}."
         db.log("cd-check", message)
+
+
+    def _search_offsets(self, album_dir: str) -> None:
+        report = cdverify.search_offsets(album_dir, self._stop.is_set,
+                                         lambda path, i, n: self._update(current=path, cd_done=i, cd_total=n))
+        lines = []
+        for d in report:
+            disc = f"disc {d['disc']}: " if len(report) > 1 else ""
+            if d["shift"] is None:
+                lines.append(f"{disc}no shift within {cdverify.OFFSET_RANGE} samples matches")
+            else:
+                lines.append(f"{disc}{d['verified']} of {d['tracks']} tracks match when shifted by "
+                             f"{d['shift']:+d} samples")
+        stopped = " (stopped)" if self._stop.is_set() else ""
+        db.log("cd-check", f"Offset search for {album_dir}{stopped}: " + ("; ".join(lines) or "nothing to search")
+               + ".")
 
 
 scanner = Scanner()

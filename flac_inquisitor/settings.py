@@ -31,6 +31,9 @@ SETTINGS = [
             "After each scan, look up CD-format albums in AccurateRip and CTDB to tell real CD rips apart. "
             "Sends disc layouts (track lengths) to accuraterip.com, db.cue.tools and, for some discs, "
             "musicbrainz.org. true or false."),
+    Setting("upsampled_verdict", "UPSAMPLED_VERDICT", "suspect", "Upsampled files count as",
+            "A hi-res file upsampled from 44.1 or 48 kHz has lost nothing compared with the CD; it is just not "
+            "the hi-res it claims to be. suspect or fake."),
     Setting("lidarr_url", "LIDARR_URL", "", "Lidarr URL", "Optional, e.g. http://lidarr:8686."),
     Setting("lidarr_api_key", "LIDARR_API_KEY", "", "Lidarr API key", "Settings > General in Lidarr.",
             secret=True),
@@ -50,6 +53,11 @@ def get(key: str) -> str:
 
 def enabled(key: str) -> bool:
     return get(key).strip().lower() == "true"
+
+
+def soft_categories() -> frozenset[str]:
+    """Categories that make a track suspect at most (detect.grade)."""
+    return frozenset({"upsampled"}) if get("upsampled_verdict").strip().lower() == "suspect" else frozenset()
 
 
 def describe() -> list[dict]:
@@ -109,6 +117,8 @@ def validate(values: dict[str, str]) -> dict:
         errors.append("Workers must be a whole number of at least 1.")
     if merged["cd_lookup"].strip().lower() not in ("true", "false"):
         errors.append("Check CD databases must be true or false.")
+    if merged["upsampled_verdict"].strip().lower() not in ("suspect", "fake"):
+        errors.append("Upsampled files count as must be suspect or fake.")
     url = merged["lidarr_url"].strip()
     if url and not url.startswith(("http://", "https://")):
         errors.append("Lidarr URL must start with http:// or https://.")

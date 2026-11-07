@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% from "macros.html" import pill, tags with context %}
+{% block title %}Accuracy · flac-inquisitor{% endblock %}
+{% macro value(v, unit) -%}
+{% if unit == "kHz" %}{{ "%.1f"|format(v / 1000) }} kHz{% elif unit == "%" %}{{ "%.2f"|format(v * 100) }}%{% else %}{{ "%.1f"|format(v) }} dB{% endif %}
+{%- endmacro %}
+{% block content %}
+<h1>Accuracy</h1>
+<p class="muted">Tracks verified against AccurateRip or CTDB are bit-identical to rips of pressed CDs, so they are not
+transcodes made after the CD. This page shows how the checks behave on them: every warning or failure below is
+either a false alarm or a CD mastered from a lossy source. Only CD-format tracks (44.1 kHz, 16 bit) can be verified,
+so the hi-res and bit-depth padding checks are not covered.</p>
+
+{% if not report.tracks %}
+<div class="empty sheet">
+  <h2>No CD-verified tracks yet</h2>
+  <p>Turn on "Check CD databases" in Settings and run a scan.</p>
+</div>
+{% else %}
+<div class="grid">
+  <a class="sheet stat" href="/tracks?verdict=all&cd=verified"><div class="value">{{ report.tracks }}</div><div class="label">CD-verified tracks in {{ report.albums }} album{{ "" if report.albums == 1 else "s" }}</div></a>
+  <a class="sheet stat" href="/tracks?verdict=ok&cd=verified"><div class="value">{{ report.by_verdict.ok }}</div><div class="label">judged OK</div></a>
+  <a class="sheet stat suspect" href="/tracks?verdict=suspect&cd=verified"><div class="value">{{ report.by_verdict.suspect }}</div><div class="label">judged suspect</div></a>
+  <a class="sheet stat fake" href="/tracks?verdict=fake&cd=verified"><div class="value">{{ report.by_verdict.fake }}</div><div class="label">judged fake</div></a>
+</div>
+{% if report.outdated %}<p class="muted">{{ report.outdated }} of these tracks were analyzed by an older version of the checks: run a scan to bring them up to date.</p>{% endif %}
+
+<h2>Checks that raised an alarm</h2>
+{% if report.checks %}
+<div class="sheet" style="padding:0">
+<table class="cards">
+  <thead><tr><th>Check</th><th class="num">Warnings</th><th class="num">Failures</th></tr></thead>
+  <tbody>
+  {% for check, counts in report.checks %}
+    <tr><td class="mono">{{ check }}</td>
+      <td data-label="Warnings" class="num">{{ counts.warn }}</td>
+      <td data-label="Failures" class="num">{{ counts.fail }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p>None: no check raised an alarm on a CD-verified track.</p>{% endif %}
+
+<h2>Measured values</h2>
+<p class="muted">The tail that matters for each threshold: the lowest values for frequencies, the highest for the
+rest. "Beyond" counts the CD-verified tracks on the wrong side of each threshold.</p>
+<div class="sheet" style="padding:0">
+<table class="cards">
+  <thead><tr><th>Measurement</th><th class="num">Tracks</th><th>Distribution</th><th>Beyond</th></tr></thead>
+  <tbody>
+  {% for m in report.metrics %}
+    <tr>
+      <td>{{ m.label }}</td>
+      <td data-label="Tracks" class="num">{{ m.count }}</td>
+      <td data-label="Distribution" class="num">{% for name, v in m.quantiles %}{{ name }} {{ value(v, m.unit) }}{% if not loop.last %} · {% endif %}{% endfor %}</td>
+      <td data-label="Beyond">{% for name, limit, n in m.beyond %}<div>{{ name }} {{ value(limit, m.unit) }}: <strong>{{ n }}</strong></div>{% endfor %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>CD-verified tracks judged fake or suspect</h2>
+{% if report.flagged %}
+<div class="sheet" style="padding:0">
+<table class="cards">
+  <thead><tr><th>Track</th><th>Verdict</th><th>Why</th></tr></thead>
+  <tbody>
+  {% for t in report.flagged %}
+    <tr>
+      <td class="title-cell"><a href="/albums/{{ t.album_key }}#track-{{ t.id }}">{{ t.title or t.name }}</a>
+        <div class="sub">{{ t.artist or '' }}{% if t.album %} · {{ t.album }}{% endif %}</div></td>
+      <td data-label="Verdict">{{ pill(t.eff) }}</td>
+      <td data-label="Why">{{ t.summary }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p>None.</p>{% endif %}
+{% endif %}
+{% endblock %}

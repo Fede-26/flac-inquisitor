@@ -9,12 +9,12 @@ from pathlib import Path
 
 import numpy as np
 
-from flac_inquisitor.analyzer import REF_BAND, Measurements, measure
+from flac_inquisitor.analyzer import HOLE_BAND_WIDTH, REF_BAND, Measurements, measure
 from flac_inquisitor.flacmeta import FlacInfo, read_flac_info
 
 # Bump whenever a threshold or a check changes: stored results with an older
 # version are re-analyzed on the next scan.
-ALGO_VERSION = 3
+ALGO_VERSION = 4
 
 # Thresholds, calibrated on 07/11/2026 against 58 tracks of a real library and
 # fakes made from them with LAME, AAC, Opus, Vorbis and ffmpeg's resampler
@@ -27,6 +27,15 @@ CUTOFF_SUSPECT_HZ = 20_500  # MP3 320 and Opus cut at 20.0-20.5 kHz; 49 of 58 or
 HIRES_STEP_SUSPECT_DB = 12.0
 HIRES_STEP_FAKE_DB = 20.0
 HIRES_FLAT_DB = 5.0  # above 27 kHz an upsampled file is a flat noise floor
+# Upsampled masters with noise added after the upsampling step only 6-20 dB:
+# content fades into a floor that stays flat from about 23 kHz up. Spread of
+# the 500 Hz bands from 26 kHz up: 46 of 47 such tracks 0.2-4.4 dB, real
+# hi-res 6.6-16.7 dB (6 tracks, the only ground truth so far). The floor must
+# also sit well below the 16-20 kHz content (those tracks: 12-31 dB), or a
+# flat full-band recording would pass for one.
+PLATEAU_SPREAD_DB = 4.5
+PLATEAU_BELOW_DB = 10.0
+PLATEAU_EDGE_MAX_HZ = 25_000  # content of 44.1 and 48 kHz audio ends below this
 # Isolated band holes: one 500 Hz band vanishes while both neighbours keep
 # playing, which music does not do but MP3 and Vorbis encoders do. Share of
 # loud frames with at least one such hole: originals p90 0.08%, LAME V0
@@ -35,9 +44,23 @@ HOLE_DROP_DB = 25.0
 HOLE_NEIGHBOUR_DB = 10.0
 HOLES_SUSPECT = 0.005
 HOLES_FAKE = 0.04
+# Per-frame bandwidth: the highest band still above FRAME_TOP_FLOOR_DB
+# (relative to the frame's 1-10 kHz level), at the 10th percentile of loud
+# frames. High-bitrate MP3 and Vorbis switch the top bands off now and then,
+# which the average spectrum smooths over. Calibration on 42 originals: 11 of
+# the 18 LAME V0 and 13 of the 25 Vorbis q9 fakes missed by the other checks
+# stop below 20.5 kHz (top edge of the band), but so do 4 originals (dark
+# recordings). Measured and
+# shown only, until the CD-verified tracks of a real library (Accuracy page)
+# say where a threshold can go.
+FRAME_TOP_FLOOR_DB = -70.0
+FRAME_TOP_SHOWN_HZ = 20_500
 LOSSYWAV_FAKE_RATIO = 0.25
 LOSSYWAV_SUSPECT_RATIO = 0.05
 MIN_LOUD_BLOCKS = 10
+# Left and right identical in all but a few frames (a click, a fade) is mono
+# audio stored as stereo.
+MONO_MAX_DIFF = 0.001
 CD_SECTOR = 588  # samples per CD sector at 44.1 kHz (44100 / 75)
 
 
@@ -126,6 +149,21 @@ def hires_step(m: Measurements) -> tuple[float, float]:
     return step, flat
 
 
+def hires_floor(m: Measurements) -> dict:
+    """The noise floor above the CD band of a hi-res file: how flat it is
+    (spread) up to top, how far below the 16-20 kHz content (below), and
+    where the spectrum reaches it (edge)."""
+    ref = _band_mean_db(m.freqs, m.mid_power, *REF_BAND)
+    level = lambda lo, hi: _band_mean_db(m.freqs, m.mid_power, lo, hi) - ref  # noqa: E731
+    top = min(0.85 * m.sample_rate / 2, 40_000)  # below the final anti-alias roll-off
+    floor = np.array([level(f, f + 500) for f in np.arange(26_000, top, 500)])
+    median = float(np.median(floor))
+    edge = next((float(f) for f in np.arange(18_000, 26_000, 250) if level(f, f + 250) <= median + 3), None)
+    return {"spread": float(np.percentile(floor, 90) - np.percentile(floor, 10)),
+            "below": float(np.mean([level(f, f + 500) for f in range(16_000, 20_000, 500)]) - median),
+            "edge": edge, "top": top}
+
+
 def hole_ratio(m: Measurements, cutoff_hz: float | None) -> tuple[float | None, int]:
     """Share of loud frames where a high band vanishes while the bands on both
     sides keep playing: the encoder giving up on that band for a moment."""
@@ -149,7 +187,19 @@ def hole_ratio(m: Measurements, cutoff_hz: float | None) -> tuple[float | None, 
     return float(isolated.any(axis=1).mean()), int(active.sum())
 
 
-def evaluate(info: FlacInfo, m: Measurements) -> Result:
+def frame_top(m: Measurements) -> float | None:
+    """10th percentile, over loud frames, of the highest band with content."""
+    if len(m.frame_ref_db) < 20 or m.band_db.shape[1] == 0:
+        return None
+    loud = m.frame_ref_db >= np.median(m.frame_ref_db) - 10
+    over = m.band_db[loud] > FRAME_TOP_FLOOR_DB
+    last = over.shape[1] - 1 - np.argmax(over[:, ::-1], axis=1)
+    tops = np.where(over.any(axis=1), m.band_edges[last] + HOLE_BAND_WIDTH, m.band_edges[0])
+    return float(np.percentile(tops, 10))
+
+
+def evaluate(info: FlacInfo, m: Measurements, soft: frozenset[str] = frozenset()) -> Result:
+    """soft: categories that make the file suspect at most (see grade)."""
     ev: list[Evidence] = []
     metrics: dict = {}
 
@@ -175,14 +225,27 @@ def evaluate(info: FlacInfo, m: Measurements) -> Result:
     nyquist = m.sample_rate / 2
     if m.sample_rate > 48_000:
         step, flat = hires_step(m)
+        floor = hires_floor(m)
         metrics["hires_step_db"] = step
         metrics["hires_flat_db"] = flat
+        metrics["hires_floor_spread_db"] = floor["spread"]
+        metrics["hires_edge_hz"] = floor["edge"]
         rate = f"{m.sample_rate / 1000:g} kHz"
         if step >= HIRES_STEP_FAKE_DB or (step >= HIRES_STEP_SUSPECT_DB and flat <= HIRES_FLAT_DB):
             ev.append(Evidence("hires-content", "fail",
                                f"The spectrum falls {step:.0f} dB between 20 and 26 kHz and is flat above: this "
                                f"{rate} file was upsampled from 44.1 or 48 kHz audio.",
                                "upsampled", step, f">= {HIRES_STEP_FAKE_DB:g} dB"))
+        elif (floor["spread"] <= PLATEAU_SPREAD_DB and floor["below"] >= PLATEAU_BELOW_DB
+              and floor["edge"] is not None and floor["edge"] <= PLATEAU_EDGE_MAX_HZ):
+            # The edge says where the content ends, not the source rate: in
+            # calibration, files upsampled from 44.1 kHz also reached their
+            # floor at 23-25 kHz, through the resampler's roll-off.
+            ev.append(Evidence("hires-content", "fail",
+                               f"Above {floor['edge'] / 1000:.1f} kHz this {rate} file holds only a flat noise "
+                               f"floor (within {floor['spread']:.1f} dB up to {floor['top'] / 1000:.0f} kHz): no content "
+                               "beyond what 44.1 or 48 kHz audio carries. It was upsampled.",
+                               "upsampled", floor["spread"], f"<= {PLATEAU_SPREAD_DB:g} dB"))
         elif step >= HIRES_STEP_SUSPECT_DB:
             ev.append(Evidence("hires-content", "warn",
                                f"The spectrum falls {step:.0f} dB between 20 and 26 kHz: this {rate} file may "
@@ -219,6 +282,13 @@ def evaluate(info: FlacInfo, m: Measurements) -> Result:
         ev.append(Evidence("hf-holes", "pass", f"High bands are continuous ({holes:.2%} of loud moments with "
                            f"isolated dropouts, {n_bands} bands checked).", value=holes))
 
+    top = frame_top(m)
+    metrics["frame_top_hz"] = top
+    if top is not None and top < FRAME_TOP_SHOWN_HZ:
+        ev.append(Evidence("frame-bandwidth", "info", f"In one loud moment in ten, nothing reaches above "
+                           f"{top / 1000:.1f} kHz. High-bitrate MP3 and Vorbis do this, dark recordings too: "
+                           "measured only, not part of the verdict yet.", value=top))
+
     # Bit depth.
     tz = m.block_trailing_zeros
     if len(tz) >= MIN_LOUD_BLOCKS:
@@ -241,6 +311,15 @@ def evaluate(info: FlacInfo, m: Measurements) -> Result:
         else:
             ev.append(Evidence("bit-depth", "pass", f"All {m.bits_per_sample} bits are in use.", value=used))
 
+    # Mono stored as stereo. Mono recordings are released like this on CD, so
+    # on its own it is only a hint; album coherence flags a mono track in a
+    # stereo album.
+    if m.channel_diff is not None:
+        metrics["mono"] = m.channel_diff < MONO_MAX_DIFF
+        if metrics["mono"]:
+            ev.append(Evidence("channels", "info", "Left and right channels are identical: mono audio stored as "
+                               "stereo.", value=m.channel_diff))
+
     # Weak hints: shown to the user, never decisive on their own.
     if info.has_id3v2 or info.has_id3v1:
         ev.append(Evidence("id3", "info", "The file carries ID3 tags, which FLAC encoders do not write: it went "
@@ -260,30 +339,31 @@ def evaluate(info: FlacInfo, m: Measurements) -> Result:
         metrics["bitrate_kbps"] = kbps
         ev.append(Evidence("bitrate", "info", f"FLAC bitrate {kbps:.0f} kbps.", value=kbps))
 
-    return _verdict(ev, m.audio_md5, metrics)
+    return _verdict(ev, m.audio_md5, metrics, soft)
 
 
-def _verdict(ev: list[Evidence], audio_md5: str, metrics: dict) -> Result:
-    fails = [e for e in ev if e.result == "fail"]
-    warns = [e for e in ev if e.result == "warn"]
-    warn_cats = [e.category for e in warns]
+def grade(marks: list[tuple[str, str | None]], soft: frozenset[str] = frozenset()) -> str:
+    """Verdict from the (result, category) of each piece of evidence. A fail
+    in a soft category counts as a warning: such a file is suspect at most."""
+    fails = [c for r, c in marks if r == "fail" and c not in soft]
+    warns = [c for r, c in marks if r == "warn" or (r == "fail" and c in soft)]
     # Two independent warnings pointing to the same cause are as good as a fail.
-    doubled = {c for c in warn_cats if warn_cats.count(c) >= 2}
-    if fails or doubled:
-        verdict = "fake"
-    elif warns:
-        verdict = "suspect"
-    else:
-        verdict = "ok"
-    categories = sorted({e.category for e in fails + warns if e.category})
-    lead = (fails or warns or [None])[0]
-    summary = lead.message if lead else "Looks like genuine lossless audio."
-    return Result(verdict, categories, summary, ev, audio_md5, metrics)
+    hard = [c for c in warns if c not in soft]
+    if fails or any(hard.count(c) >= 2 for c in hard):
+        return "fake"
+    return "suspect" if warns else "ok"
 
 
-def analyze_file(path: str | Path) -> Result:
+def _verdict(ev: list[Evidence], audio_md5: str, metrics: dict, soft: frozenset[str]) -> Result:
+    flagged = [e for e in ev if e.result == "fail"] + [e for e in ev if e.result == "warn"]
+    categories = sorted({e.category for e in flagged if e.category})
+    summary = flagged[0].message if flagged else "Looks like genuine lossless audio."
+    return Result(grade([(e.result, e.category) for e in ev], soft), categories, summary, ev, audio_md5, metrics)
+
+
+def analyze_file(path: str | Path, soft: frozenset[str] = frozenset()) -> Result:
     info = read_flac_info(path)
-    return evaluate(info, measure(path, info))
+    return evaluate(info, measure(path, info), soft)
 
 
 # Album coherence. A track that differs from the rest of its album points to a
@@ -292,8 +372,9 @@ OUTLIER_CUTOFF_HZ = 2_000
 
 
 def album_coherence(tracks: list[dict]) -> dict[int, Evidence]:
-    """tracks: dicts with "format" ("44100/16") and "cutoff_hz" (None = no
-    hard cutoff). Returns evidence for the tracks that stand out, by index."""
+    """tracks: dicts with "format" ("44100/16"), "cutoff_hz" (None = no hard
+    cutoff) and "mono" (True, False, or None when not stereo). Returns
+    evidence for the tracks that stand out, by index."""
     if len(tracks) < 3:
         return {}
     out: dict[int, Evidence] = {}
@@ -305,6 +386,13 @@ def album_coherence(tracks: list[dict]) -> dict[int, Evidence]:
             if fmt != common:
                 out[i] = Evidence("album-format", "warn", f"This track is {fmt}, the rest of the album is {common}.",
                                   "mixed-sources", fmt, common)
+
+    stereo = [t.get("mono") is False for t in tracks]
+    if sum(stereo) > len(tracks) / 2:
+        for i, t in enumerate(tracks):
+            if t.get("mono") and i not in out:
+                out[i] = Evidence("album-mono", "warn", "Left and right channels are identical, while the rest of "
+                                  "the album is stereo: mono audio made to look like stereo.", "fake-stereo")
 
     def effective(t: dict) -> float:
         rate = int(t["format"].split("/")[0])
