@@ -13,12 +13,14 @@ from flac_inquisitor.detect import ALGO_VERSION
 VERDICTS = ("fake", "suspect", "ok", "error")
 PAGE_SIZE = 50
 
-# Effective verdict of a track row, as SQL: errors first, then ignores.
+# Effective verdict of a track row, as SQL: errors first, then ignores. The
+# final verdict (with album coherence) is computed when a scan ends; until
+# then a freshly analyzed track shows its own verdict.
 EFFECTIVE = """
 CASE
-  WHEN t.error IS NOT NULL OR t.final_verdict IS NULL THEN 'error'
+  WHEN t.error IS NOT NULL OR t.verdict IS NULL THEN 'error'
   WHEN i.audio_md5 IS NOT NULL THEN 'ok'
-  ELSE t.final_verdict
+  ELSE COALESCE(t.final_verdict, t.verdict)
 END"""
 RANK = f"CASE {EFFECTIVE} WHEN 'fake' THEN 3 WHEN 'error' THEN 2 WHEN 'suspect' THEN 1 ELSE 0 END"
 BASE = "FROM tracks t LEFT JOIN ignores i ON i.audio_md5 = t.audio_md5 WHERE t.missing = 0"

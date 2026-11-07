@@ -115,3 +115,12 @@ def test_cd_check_can_be_turned_off(client, monkeypatch):
     monkeypatch.setattr(cdverify, "fetch", lambda url: pytest.fail("no lookups when turned off"))
     scan(client)
     assert client.get("/api/tracks?verdict=all&cd=unchecked").json()["total"] == 3
+
+
+def test_tracks_show_their_verdict_while_the_scan_runs(client):
+    scan(client)
+    # As during a scan: analyzed, album coherence not computed yet.
+    with db.connect() as conn:
+        conn.execute("UPDATE tracks SET final_verdict = NULL, final_categories = NULL")
+    verdicts = sorted(t["effective_verdict"] for t in client.get("/api/tracks?verdict=all").json()["items"])
+    assert verdicts == ["fake", "ok", "ok"]

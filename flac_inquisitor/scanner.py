@@ -299,7 +299,8 @@ class Scanner:
             lambda album, i, n: self._update(current=album, cd_done=i, cd_total=n))
         c = report["counts"]
         message = (f"CD check: {c['verified']} tracks verified, {c['mismatch']} not matching, "
-                   f"{c['not-found']} on discs the databases do not know.")
+                   f"{c['not-found']} on discs the databases do not know, "
+                   f"{c['unsupported']} not checkable (not in CD format, or not cut on CD sectors).")
         if c["failed"]:
             message += f" {c['failed']} discs not checked: {report['error']}."
         db.log("cd-check", message)
