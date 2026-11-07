@@ -1,0 +1,32 @@
+# Example Docker Compose file for flac-inquisitor.
+# Copy it to compose.yaml, change the paths and the user, then run
+#   docker compose up -d
+# and open http://<host>:8080. See docs/tutorials/getting-started.md.
+
+services:
+  flac-inquisitor:
+    image: ghcr.io/fede-26/flac-inquisitor:latest
+    # The owner of the music files (find it with `id -u` and `id -g`). The
+    # app moves files into the quarantine and back, so it needs write access
+    # to both folders; it does not need root.
+    user: "1000:1000"
+    ports:
+      - "8080:8080"
+    volumes:
+      # One mount that holds both the library and the quarantine, so moving a
+      # file to the quarantine is an instant rename. With two separate mounts
+      # every move becomes copy, verify, delete.
+      - /srv/media:/media
+      # Database and spectrogram cache. Create the folder first, owned by the
+      # user above, or the app cannot write to it.
+      - ./data:/data
+    environment:
+      LIBRARY_PATH: /media/music
+      QUARANTINE_PATH: /media/quarantine
+      # Files analyzed in parallel. Each worker uses one CPU core while it
+      # decodes.
+      WORKERS: "2"
+      # Optional, see docs/how-to/connect-lidarr.md.
+      # LIDARR_URL: http://lidarr:8686
+      # LIDARR_API_KEY: your-api-key
+    restart: unless-stopped
