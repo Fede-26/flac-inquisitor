@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- A spectrum that stops dead at a cutoff, under a magnifying glass:
+       the tell-tale sign of a lossy source. Colours follow the app theme. -->
+  <style>
+    .paper { fill: #f6f1e7; }
+    .bar { fill: #9d90d0; }
+    .ink { stroke: #2b2a27; }
+    @media (prefers-color-scheme: dark) {
+      .paper { fill: #26231f; }
+      .bar { fill: #b3a7e6; }
+      .ink { stroke: #ece6da; }
+    }
+  </style>
+  <rect class="paper" width="32" height="32" rx="7"/>
+  <rect class="bar" x="4" y="9" width="3" height="18" rx="1"/>
+  <rect class="bar" x="8" y="12" width="3" height="15" rx="1"/>
+  <rect class="bar" x="12" y="14" width="3" height="13" rx="1"/>
+  <rect class="bar" x="16" y="17" width="3" height="10" rx="1"/>
+  <circle class="ink" cx="21" cy="12" r="6" fill="none" stroke-width="2.5"/>
+  <path class="ink" d="M25.5 16.5 L29 20" stroke-width="3" stroke-linecap="round"/>
+</svg>
