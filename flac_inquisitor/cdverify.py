@@ -77,6 +77,10 @@ class CDChecksums:
 
     def update(self, samples: np.ndarray) -> None:
         """samples: frames x 2, 16-bit values in any integer dtype."""
+        # A damaged file can decode to more samples than its header promises.
+        # The excess is only counted: result() then rejects the track.
+        received = len(samples)
+        samples = samples[: max(self.n - self.pos, 0)]
         n = len(samples)
         idx = np.arange(self.pos, self.pos + n, dtype=np.uint64)
         u = samples.astype(np.int64) & 0xFFFF
@@ -99,7 +103,7 @@ class CDChecksums:
                 end = min(self.pos + n, self.bounds[piece + 1])
                 self.crcs[piece] = zlib.crc32(data[4 * (start - self.pos) : 4 * (end - self.pos)], self.crcs[piece])
                 start = end
-        self.pos += n
+        self.pos += received
 
     def result(self) -> dict | None:
         if self.pos != self.n:

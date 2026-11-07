@@ -156,3 +156,12 @@ def test_scan_stores_the_cd_status(samples, tmp_path, monkeypatch):
     assert {t["cd_status"] for t in tracks().values()} == {"verified"}
     # The verdict is unchanged: a real CD can be mastered from a lossy source.
     assert tracks()["Artist/Album/03.flac"]["final_verdict"] == "fake"
+
+
+def test_more_samples_than_the_header_promises():
+    # A damaged file decoded to more samples than its STREAMINFO says: the
+    # analysis must go on, without CD checksums for that track.
+    cd = cdverify.CDChecksums(30_000)
+    cd.update(np.ones((20_000, 2), dtype=np.int32))
+    cd.update(np.ones((20_000, 2), dtype=np.int32))
+    assert cd.result() is None
