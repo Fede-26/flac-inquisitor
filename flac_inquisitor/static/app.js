@@ -168,6 +168,120 @@ const FI = (() => {
     return null;
   }
 
+  // Folder search for the scan form. Every word typed must appear in the
+  // path, ignoring case and accents, so "toho vol 3" finds
+  // "A-One/[2011] TOHO EUROBEAT VOL.3 …".
+  function folderSearch(combo) {
+    const input = $("input", combo);
+    const list = $("ul", combo);
+    const LIMIT = 60;
+    const fold = (s) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    let folders = null;  // [{ path, folded }], fetched on first use: listing a large library is not free
+    let shown = [];
+    let active = -1;
+
+    function highlight(text, words) {
+      // Marks the first match of each word; built from text nodes, never HTML.
+      const folded = fold(text);
+      const marks = [];
+      for (const w of words) {
+        const at = folded.indexOf(w);
+        if (at >= 0) marks.push([at, at + w.length]);
+      }
+      marks.sort((a, b) => a[0] - b[0]);
+      const out = document.createDocumentFragment();
+      let pos = 0;
+      for (const [from, to] of marks) {
+        if (from < pos) continue;
+        out.append(text.slice(pos, from));
+        const m = document.createElement("mark");
+        m.textContent = text.slice(from, to);
+        out.append(m);
+        pos = to;
+      }
+      out.append(text.slice(pos));
+      return out;
+    }
+
+    function setActive(i) {
+      const items = $$("li[role=option]", list);
+      items.forEach((li, j) => li.setAttribute("aria-selected", String(j === i)));
+      active = i;
+      if (items[i]) {
+        input.setAttribute("aria-activedescendant", items[i].id);
+        items[i].scrollIntoView({ block: "nearest" });
+      } else input.removeAttribute("aria-activedescendant");
+    }
+
+    function close() {
+      list.hidden = true;
+      input.setAttribute("aria-expanded", "false");
+      setActive(-1);
+    }
+
+    function render() {
+      if (!folders) return;
+      const words = fold(input.value).split(/[\s/]+/).filter(Boolean);
+      const hits = folders.filter((f) => words.every((w) => f.folded.includes(w)));
+      shown = hits.slice(0, LIMIT);
+      list.replaceChildren(...shown.map((f, i) => {
+        const li = document.createElement("li");
+        li.id = `folder-option-${i}`;
+        li.setAttribute("role", "option");
+        const slash = f.path.indexOf("/");
+        const name = Object.assign(document.createElement("span"), { className: "name" });
+        name.append(highlight(slash < 0 ? f.path : f.path.slice(slash + 1), words));
+        const where = Object.assign(document.createElement("span"), { className: "where" });
+        if (slash < 0) where.textContent = "Every album of this artist";
+        else where.append(highlight(f.path.slice(0, slash), words));
+        li.append(name, where);
+        // mousedown, not click: it fires before the field loses focus.
+        li.addEventListener("mousedown", (e) => { e.preventDefault(); choose(i); });
+        return li;
+      }));
+      if (!hits.length || hits.length > LIMIT) {
+        const note = document.createElement("li");
+        note.className = "note";
+        note.textContent = hits.length ? `${hits.length - LIMIT} more: keep typing to narrow down.`
+          : "No folder matches.";
+        list.append(note);
+      }
+      list.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+      setActive(input.value.trim() && shown.length ? 0 : -1);
+    }
+
+    function choose(i) {
+      input.value = shown[i].path;
+      close();
+    }
+
+    input.addEventListener("focus", async () => {
+      if (!folders) {
+        const { data } = await api("GET", "/api/folders").catch(() => ({ data: [] }));
+        folders = data.map((path) => ({ path, folded: fold(path) }));
+      }
+      render();
+    });
+    input.addEventListener("input", render);
+    input.addEventListener("blur", close);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (list.hidden) { render(); return; }
+        const n = shown.length;
+        if (n) setActive(e.key === "ArrowDown" ? (active + 1) % n : (active - 1 + n) % n);
+      } else if (e.key === "Enter" && !list.hidden && active >= 0) {
+        e.preventDefault();
+        choose(active);
+      } else if (e.key === "Escape" && !list.hidden) {
+        e.preventDefault();
+        close();
+      }
+    });
+  }
+
+
   // Pages.
 
   function dashboard() {
@@ -191,7 +305,14 @@ const FI = (() => {
           `${s.done} of ${s.total} files · ${s.analyzed} analyzed · ${s.cached} unchanged · ${s.errors} errors${eta}`;
         $("[data-current]", progress).textContent = s.current || "";
         $("[data-scan-text]", box).textContent = s.state === "stopping" ? "Stopping after the files in progress…"
+          : s.phase === "checking CDs" ? "Checking CD databases…"
           : s.folder ? `Scanning ${s.folder}…` : "Scanning…";
+        if (s.phase === "checking CDs") {
+          // The second phase counts albums, not files.
+          $("progress", progress).max = Math.max(s.cd_total, 1);
+          $("progress", progress).value = s.cd_done;
+          $("[data-counts]", progress).textContent = `${s.cd_done} of ${s.cd_total} albums`;
+        }
       }
     }
 
@@ -213,14 +334,7 @@ const FI = (() => {
     stop.addEventListener("click", () => api("DELETE", "/api/scan").then(poll));
     if (box.dataset.state !== "idle") { timer = setInterval(poll, 1000); poll(); }
 
-    // Folder suggestions, fetched once on first use: listing the library is
-    // not free on a large collection.
-    $("[data-folder]", box).addEventListener("focus", async () => {
-      const dl = $("#library-folders");
-      if (dl.childElementCount) return;
-      const { data } = await api("GET", "/api/folders").catch(() => ({ data: [] }));
-      dl.replaceChildren(...data.map((f) => Object.assign(document.createElement("option"), { value: f })));
-    }, { once: true });
+    folderSearch($("[data-combo]", box));
   }
 
   function library() {
@@ -298,7 +412,8 @@ const FI = (() => {
       rescan.disabled = true;
       const timer = setInterval(async () => {
         const { data } = await api("GET", "/api/scan");
-        rescan.textContent = `Scanning… ${data.done}/${data.total}`;
+        rescan.textContent = data.phase === "checking CDs" ? "Checking CD databases…"
+          : `Scanning… ${data.done}/${data.total}`;
         if (data.state === "idle") { clearInterval(timer); location.reload(); }
       }, 1000);
     });
@@ -410,8 +525,8 @@ const FI = (() => {
     const report = $("[data-report]");
     const values = () => {
       const out = {};
-      for (const el of $$("input[name], textarea[name]", form)) {
-        if (el.readOnly) continue;
+      for (const el of $$("input[name], textarea[name], select[name]", form)) {
+        if (el.readOnly || el.disabled) continue;
         // An empty secret field keeps the saved key.
         if (el.type === "password" && !el.value) continue;
         out[el.name] = el.value;

@@ -12,6 +12,17 @@
 <span class="pill {{ verdict }}">{{ {"ok": "OK", "suspect": "Suspect", "fake": "Fake", "error": "Error"}[verdict] }}</span>
 {%- endmacro %}
 
+{% macro cd_badge(t) -%}
+{% if t.cd_status == "verified" %}<span class="pill cd" title="Bit-identical to a CD rip in{% if t.cd_ar %} AccurateRip (confidence {{ t.cd_ar }}){% endif %}{% if t.cd_ar and t.cd_ctdb %} and{% endif %}{% if t.cd_ctdb %} CTDB (confidence {{ t.cd_ctdb }}){% endif %}">CD verified</span>{% endif %}
+{%- endmacro %}
+
+{% macro cd_note(t) -%}
+{% if t.cd_status == "verified" %}Bit-identical to rips of a pressed CD{% if t.cd_ar %}: AccurateRip confidence {{ t.cd_ar }}{% endif %}{% if t.cd_ctdb %}{{ "," if t.cd_ar else ":" }} CTDB confidence {{ t.cd_ctdb }}{% endif %}.{% if t.effective_verdict in ("fake", "suspect") %} So this is a real CD rip: any lossy signs come from how the CD itself was mastered.{% endif %}
+{% elif t.cd_status == "mismatch" %}The CD databases know this disc, but this rip does not match it. Common harmless causes: another pressing, or a rip not corrected for the drive offset.
+{% elif t.cd_status == "not-found" %}The CD databases do not know a disc with these track lengths.
+{% endif %}
+{%- endmacro %}
+
 {% macro tags(categories) -%}
 {% for c in categories %}<span class="tag">{{ CATEGORY_LABELS.get(c, c) }}</span> {% endfor %}
 {%- endmacro %}

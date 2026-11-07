@@ -33,13 +33,13 @@ def page(request: Request, name: str, **context) -> HTMLResponse:
 
 
 def filters_from(verdict: list[str] | None, category: str | None, fmt: str | None, q: str | None,
-                 sort: str, page_no: int) -> queries.Filters:
+                 sort: str, page_no: int, cd: str | None = None) -> queries.Filters:
     verdicts = [v for v in (verdict or ["fake", "suspect"]) if v in queries.VERDICTS]
     # "all" in the query string means no verdict filter.
     if verdict == ["all"]:
         verdicts = []
     return queries.Filters(verdicts=verdicts, category=category or None, fmt=fmt or None, q=q or None,
-                           sort=sort, page=max(page_no, 1))
+                           cd=cd or None, sort=sort, page=max(page_no, 1))
 
 
 def library_ok() -> str | None:
@@ -65,8 +65,9 @@ def dashboard(request: Request):
 @app.get("/albums", response_class=HTMLResponse)
 @app.get("/tracks", response_class=HTMLResponse)
 def library(request: Request, verdict: list[str] | None = Query(None), category: str | None = None,
-            fmt: str | None = None, q: str | None = None, sort: str = "severity", page_no: int = Query(1, alias="page")):
-    f = filters_from(verdict, category, fmt, q, sort, page_no)
+            fmt: str | None = None, q: str | None = None, cd: str | None = None, sort: str = "severity",
+            page_no: int = Query(1, alias="page")):
+    f = filters_from(verdict, category, fmt, q, sort, page_no, cd)
     by_track = request.url.path == "/tracks"
     result = queries.list_tracks(f) if by_track else queries.list_albums(f)
     return page(request, "library.html", result=result, filters=f, by_track=by_track,
@@ -159,8 +160,9 @@ def api_summary() -> dict:
 
 @app.get("/api/albums")
 def api_albums(verdict: list[str] | None = Query(None), category: str | None = None, fmt: str | None = None,
-               q: str | None = None, sort: str = "severity", page_no: int = Query(1, alias="page")) -> dict:
-    return queries.list_albums(filters_from(verdict, category, fmt, q, sort, page_no))
+               q: str | None = None, cd: str | None = None, sort: str = "severity",
+               page_no: int = Query(1, alias="page")) -> dict:
+    return queries.list_albums(filters_from(verdict, category, fmt, q, sort, page_no, cd))
 
 
 @app.get("/api/albums/{album_key}")
@@ -173,8 +175,9 @@ def api_album(album_key: str) -> dict:
 
 @app.get("/api/tracks")
 def api_tracks(verdict: list[str] | None = Query(None), category: str | None = None, fmt: str | None = None,
-               q: str | None = None, sort: str = "severity", page_no: int = Query(1, alias="page")) -> dict:
-    return queries.list_tracks(filters_from(verdict, category, fmt, q, sort, page_no))
+               q: str | None = None, cd: str | None = None, sort: str = "severity",
+               page_no: int = Query(1, alias="page")) -> dict:
+    return queries.list_tracks(filters_from(verdict, category, fmt, q, sort, page_no, cd))
 
 
 def _track_or_404(track_id: int) -> dict:

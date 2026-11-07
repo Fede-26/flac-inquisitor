@@ -16,7 +16,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path, PurePosixPath
 
-from flac_inquisitor import db, settings
+from flac_inquisitor import cdverify, db, settings
 from flac_inquisitor.analyzer import measure
 from flac_inquisitor.detect import ALGO_VERSION, album_coherence, evaluate
 from flac_inquisitor.flacmeta import FlacInfo, NotFlacError, read_flac_info
@@ -84,12 +84,14 @@ def analyze_track(path: str) -> dict:
         return {"verdict": "fake", "categories": ["not-flac"], "summary": evidence[0]["message"],
                 "evidence": evidence, "metrics": {}, "audio_md5": None, "error": None}
     try:
-        result = evaluate(info, measure(p, info))
+        m = measure(p, info)
+        result = evaluate(info, m)
     except Exception as exc:  # a broken file must not stop the scan
         return {**tag_columns(info), "error": f"{type(exc).__name__}: {exc}", "verdict": None}
     d = result.to_dict()
     return {**tag_columns(info), "verdict": d["verdict"], "categories": d["categories"], "summary": d["summary"],
-            "evidence": d["evidence"], "metrics": d["metrics"], "audio_md5": d["audio_md5"], "error": None}
+            "evidence": d["evidence"], "metrics": {**d["metrics"], "cd": m.cd}, "audio_md5": d["audio_md5"],
+            "error": None}
 
 
 def list_flacs(root: Path, exclude: list[str], sub: str = "") -> list[str]:
@@ -158,7 +160,7 @@ class Scanner:
         self._thread: threading.Thread | None = None
         self._state = {"state": "idle", "total": 0, "done": 0, "cached": 0, "analyzed": 0, "errors": 0,
                        "current": None, "started_at": None, "finished_at": None, "message": None,
-                       "folder": None}
+                       "folder": None, "phase": None, "cd_done": 0, "cd_total": 0}
 
     def status(self) -> dict:
         with self._lock:
@@ -190,7 +192,8 @@ class Scanner:
             return False
         self._stop.clear()
         self._update(state="running", total=0, done=0, cached=0, analyzed=0, errors=0, current=None,
-                     started_at=time.time(), finished_at=None, message=None, folder=folder)
+                     started_at=time.time(), finished_at=None, message=None, folder=folder, phase="analyzing",
+                     cd_done=0, cd_total=0)
         self._thread = threading.Thread(target=self._run, args=(full, folder), daemon=True)
         self._thread.start()
         return True
@@ -207,7 +210,7 @@ class Scanner:
             self._update(message=f"{type(exc).__name__}: {exc}")
             db.log("scan", f"Scan failed: {exc}")
         finally:
-            self._update(state="idle", current=None, finished_at=time.time())
+            self._update(state="idle", current=None, phase=None, finished_at=time.time())
 
     def _scan(self, full: bool, folder: str | None) -> None:
         root = Path(settings.get("library_path"))
@@ -279,11 +282,27 @@ class Scanner:
             gone = [p for p in existing if p not in seen and (folder is None or p.startswith(folder + "/"))]
             with db.connect() as conn:
                 conn.executemany("UPDATE tracks SET missing = 1 WHERE path = ?", [(p,) for p in gone])
-        recompute_albums(None if folder is None else {album_dir_of(p) for p in files + gone})
+        album_dirs = None if folder is None else {album_dir_of(p) for p in files + gone}
+        recompute_albums(album_dirs)
         s = self.status()
         where = f" of {folder}" if folder else ""
         db.log("scan", f"Scan{where} {'stopped' if stopped else 'finished'}: {s['analyzed']} analyzed, "
                        f"{s['cached']} unchanged, {s['errors']} errors.")
+        if not stopped and settings.enabled("cd_lookup"):
+            self._check_cds(album_dirs)
+
+    def _check_cds(self, album_dirs: set[str] | None) -> None:
+        # Lookups are cached, so albums checked before cost no network time.
+        self._update(phase="checking CDs", current=None)
+        report = cdverify.verify_albums(
+            album_dirs, self._stop.is_set,
+            lambda album, i, n: self._update(current=album, cd_done=i, cd_total=n))
+        c = report["counts"]
+        message = (f"CD check: {c['verified']} tracks verified, {c['mismatch']} not matching, "
+                   f"{c['not-found']} on discs the databases do not know.")
+        if c["failed"]:
+            message += f" {c['failed']} discs not checked: {report['error']}."
+        db.log("cd-check", message)
 
 
 scanner = Scanner()

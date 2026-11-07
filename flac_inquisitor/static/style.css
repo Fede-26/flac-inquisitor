@@ -138,7 +138,7 @@ label { display: block; font-weight: 500; }
 .field input, .field textarea { width: 100%; margin-top: 0.25rem; }
 .locked { font-size: 0.8rem; font-weight: 400; color: var(--info-fg); background: var(--info-bg); border-radius: 4px; padding: 0 0.35rem; }
 /* Fields fixed by an environment variable must not look editable. */
-.field input[readonly], .field textarea[readonly] {
+.field input[readonly], .field textarea[readonly], .field select:disabled {
   background: transparent; border-style: dashed; color: var(--ink-muted); cursor: not-allowed;
 }
 
@@ -265,6 +265,29 @@ kbd {
   .spectro { margin-left: 2.25rem; }
 }
 
+/* Class rules such as .compare { display: grid } would otherwise beat the
+   hidden attribute and show elements that should be hidden. */
+[hidden] { display: none !important; }
+.pill.cd { background: var(--info-bg); color: var(--info-fg); }
+
+/* Folder search: a text field with its own list, styled like the page
+   (the browser's datalist popup cannot be styled). */
+.combo { position: relative; flex: 1 1 22rem; max-width: 30rem; }
+.combo input { width: 100%; }
+.combo-list {
+  position: absolute; z-index: 20; top: 100%; left: 0; right: 0;
+  margin: 0.3rem 0 0; padding: 0.3rem; list-style: none;
+  max-height: 22rem; overflow-y: auto;
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(40, 30, 10, 0.12);
+}
+.combo-list li { padding: 0.4rem 0.6rem; border-radius: 6px; cursor: pointer; }
+.combo-list li[aria-selected="true"] { background: var(--info-bg); }
+.combo-list li .name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.combo-list li .where { display: block; font-size: 0.8rem; color: var(--ink-muted); }
+.combo-list li.note { cursor: default; font-size: 0.85rem; color: var(--ink-muted); }
+.combo-list mark { background: var(--suspect-bg); color: inherit; border-radius: 2px; }
+.pill.plain { background: transparent; color: var(--ink-muted); border: 1px solid var(--rule); }
 .visually-hidden {
   position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
 }

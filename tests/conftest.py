@@ -102,3 +102,10 @@ def samples(tmp_path_factory) -> dict[str, Path]:
     id3.write_bytes(b"ID3\x04\x00\x00\x00\x00\x00\x0a" + b"\x00" * 10 + data)
     out["id3"] = id3
     return out
+
+
+@pytest.fixture(autouse=True)
+def no_cd_lookups(monkeypatch):
+    # Scans must not reach AccurateRip or CTDB from the tests; the tests of
+    # the CD check turn it back on with fake answers.
+    monkeypatch.setenv("CD_LOOKUP", "false")

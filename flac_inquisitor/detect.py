@@ -14,7 +14,7 @@ from flac_inquisitor.flacmeta import FlacInfo, read_flac_info
 
 # Bump whenever a threshold or a check changes: stored results with an older
 # version are re-analyzed on the next scan.
-ALGO_VERSION = 2
+ALGO_VERSION = 3
 
 # Thresholds, calibrated on 07/11/2026 against 58 tracks of a real library and
 # fakes made from them with LAME, AAC, Opus, Vorbis and ffmpeg's resampler

@@ -15,6 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
+from flac_inquisitor.cdverify import CDChecksums, is_cd_format
 from flac_inquisitor.flacmeta import FlacInfo
 
 FFT_SIZE = 4096
@@ -47,6 +48,7 @@ class Measurements:
     frame_ref_db: np.ndarray  # per frame, mean power in REF_BAND, dB
     block_trailing_zeros: np.ndarray  # per loud block, unused low bits
     block_count: int  # non-silent blocks, loud or not
+    cd: dict | None = None  # CD database checksums (cdverify), for CD-format files only
 
 
 class DecodeError(RuntimeError):
@@ -112,12 +114,15 @@ def measure(path: str | Path, info: FlacInfo) -> Measurements:
     leading_zero = 0
     seen_signal = False
     carry = np.zeros((0, channels), dtype=np.int32)
+    cd = CDChecksums(info.total_samples) if is_cd_format(sr, bits, channels) and info.total_samples else None
 
     with tempfile.TemporaryFile() as err:
         for chunk in decode_chunks(path, channels, err):
             decoded += len(chunk)
             native = chunk >> shift
             md5.update(_pack_for_md5(native, bits))
+            if cd:
+                cd.update(native)
 
             if not seen_signal:
                 nonzero = np.flatnonzero(np.any(native != 0, axis=1))
@@ -171,6 +176,10 @@ def measure(path: str | Path, info: FlacInfo) -> Measurements:
         raise DecodeError(errors or "no audio decoded")
 
     frames = max(frame_count, 1)
+    cd_result = cd.result() if cd else None
+    if cd_result:
+        # Lets the CD check fall back on MusicBrainz for the disc layout.
+        cd_result["mb_release"] = (info.tags.get("MUSICBRAINZ_ALBUMID") or [None])[0]
     return Measurements(
         sample_rate=sr,
         channels=channels,
@@ -186,4 +195,5 @@ def measure(path: str | Path, info: FlacInfo) -> Measurements:
         frame_ref_db=np.concatenate(ref_rows) if ref_rows else np.zeros(0),
         block_trailing_zeros=np.array(trailing, dtype=np.int64),
         block_count=block_count,
+        cd=cd_result,
     )

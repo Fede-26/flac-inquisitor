@@ -27,6 +27,10 @@ SETTINGS = [
     Setting("workers", "WORKERS", "2", "Workers", "Files analyzed in parallel."),
     Setting("exclude", "EXCLUDE", "", "Exclude",
             "Glob patterns relative to the library, one per line (e.g. */Podcasts/*)."),
+    Setting("cd_lookup", "CD_LOOKUP", "true", "Check CD databases",
+            "After each scan, look up CD-format albums in AccurateRip and CTDB to tell real CD rips apart. "
+            "Sends disc layouts (track lengths) to accuraterip.com, db.cue.tools and, for some discs, "
+            "musicbrainz.org. true or false."),
     Setting("lidarr_url", "LIDARR_URL", "", "Lidarr URL", "Optional, e.g. http://lidarr:8686."),
     Setting("lidarr_api_key", "LIDARR_API_KEY", "", "Lidarr API key", "Settings > General in Lidarr.",
             secret=True),
@@ -42,6 +46,10 @@ def get(key: str) -> str:
         return os.environ[s.env]
     saved = db.get_setting(key)
     return saved if saved is not None else s.default
+
+
+def enabled(key: str) -> bool:
+    return get(key).strip().lower() == "true"
 
 
 def describe() -> list[dict]:
@@ -99,6 +107,8 @@ def validate(values: dict[str, str]) -> dict:
             raise ValueError
     except ValueError:
         errors.append("Workers must be a whole number of at least 1.")
+    if merged["cd_lookup"].strip().lower() not in ("true", "false"):
+        errors.append("Check CD databases must be true or false.")
     url = merged["lidarr_url"].strip()
     if url and not url.startswith(("http://", "https://")):
         errors.append("Lidarr URL must start with http:// or https://.")

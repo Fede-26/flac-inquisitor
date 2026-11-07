@@ -23,6 +23,13 @@ END"""
 RANK = f"CASE {EFFECTIVE} WHEN 'fake' THEN 3 WHEN 'error' THEN 2 WHEN 'suspect' THEN 1 ELSE 0 END"
 BASE = "FROM tracks t LEFT JOIN ignores i ON i.audio_md5 = t.audio_md5 WHERE t.missing = 0"
 RANK_NAME = {3: "fake", 2: "error", 1: "suspect", 0: "ok"}
+# Outcome of the CD database check (cdverify), as a filter.
+CD_FILTERS = {
+    "verified": "t.cd_status = 'verified'",
+    "mismatch": "t.cd_status = 'mismatch'",
+    "not-found": "t.cd_status = 'not-found'",
+    "unchecked": "(t.cd_status IS NULL OR t.cd_status = 'unsupported')",
+}
 
 
 @dataclass
@@ -31,6 +38,7 @@ class Filters:
     category: str | None = None
     fmt: str | None = None
     q: str | None = None
+    cd: str | None = None
     sort: str = "severity"
     page: int = 1
 
@@ -48,6 +56,8 @@ class Filters:
         if self.q:
             sql.append("(t.path LIKE ? OR t.artist LIKE ? OR t.album LIKE ? OR t.title LIKE ?)")
             args += [f"%{self.q}%"] * 4
+        if self.cd in CD_FILTERS:
+            sql.append(CD_FILTERS[self.cd])
         return (" AND " + " AND ".join(sql) if sql else ""), args
 
 
@@ -72,6 +82,9 @@ def summary() -> dict:
         outdated = conn.execute("SELECT COUNT(*) FROM tracks WHERE missing = 0 AND algo_version != ?",
                                 (ALGO_VERSION,)).fetchone()[0]
         ignored = conn.execute(f"SELECT COUNT(*) {BASE} AND i.audio_md5 IS NOT NULL").fetchone()[0]
+        cd_verified = conn.execute(f"SELECT COUNT(*) {BASE} AND t.cd_status = 'verified'").fetchone()[0]
+        cd_albums = conn.execute(f"SELECT COUNT(*) FROM (SELECT t.album_key {BASE} GROUP BY t.album_key "
+                                 "HAVING MIN(t.cd_status = 'verified') = 1)").fetchone()[0]
     return {
         "tracks": sum(by_verdict.values()),
         "by_verdict": {v: by_verdict.get(v, 0) for v in VERDICTS},
@@ -79,6 +92,8 @@ def summary() -> dict:
         "flagged_albums": albums,
         "outdated": outdated,
         "ignored": ignored,
+        "cd_verified": cd_verified,
+        "cd_albums": cd_albums,
     }
 
 
@@ -101,6 +116,7 @@ def list_albums(f: Filters) -> dict:
                MAX(t.artist) AS artist, MAX(t.album) AS album, COUNT(*) AS tracks,
                MAX({RANK}) AS rank,
                SUM({EFFECTIVE} = 'fake') AS fakes, SUM({EFFECTIVE} = 'suspect') AS suspects,
+               SUM(t.cd_status = 'verified') AS cd_verified,
                MIN(json_extract(t.metrics, '$.cutoff_hz')) AS worst_cutoff,
                GROUP_CONCAT(DISTINCT t.sample_rate || '/' || t.bits) AS formats,
                (SELECT GROUP_CONCAT(DISTINCT c.value) FROM tracks t2, json_each(t2.final_categories) c
@@ -156,8 +172,11 @@ def get_album(album_key: str) -> dict | None:
     rank = max({"fake": 3, "error": 2, "suspect": 1, "ok": 0}[t["effective_verdict"]] for t in tracks)
     first = tracks[0]
     lead = next((t for t in tracks if t["effective_verdict"] == RANK_NAME[rank] and rank), None)
+    checked = [t for t in tracks if t["cd_status"] in ("verified", "mismatch", "not-found")]
     return {
         "album_key": album_key,
+        "cd_verified": sum(t["cd_status"] == "verified" for t in tracks),
+        "cd_checked": len(checked),
         "album_dir": first["album_dir"],
         "artist": _artist_name(first["album_dir"], first["artist"]),
         "album": _album_name(first["album_dir"], first["album"]),

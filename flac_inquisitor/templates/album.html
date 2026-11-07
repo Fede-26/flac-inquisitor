@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import pill, tags, khz, spectrogram with context %}
+{% from "macros.html" import pill, tags, khz, spectrogram, cd_badge, cd_note with context %}
 {% block title %}{{ album.album }} · flac-inquisitor{% endblock %}
 {% block content %}
 <p class="muted" style="margin-bottom:0.25rem"><a href="javascript:history.back()">← Back</a></p>
@@ -8,7 +8,8 @@
     <h1 style="margin-bottom:0.15rem">{{ album.album }}</h1>
     <p class="muted" style="margin:0">{{ album.artist }} · <span class="mono">{{ album.album_dir }}</span></p>
   </div>
-  <div class="row">{{ pill(album.verdict) }} {{ tags(album.categories) }}</div>
+  <div class="row">{{ pill(album.verdict) }} {{ tags(album.categories) }}
+    {% if album.cd_checked %}<span class="pill {{ 'cd' if album.cd_verified else 'plain' }}">CD verified {{ album.cd_verified }}/{{ album.tracks|length }}</span>{% endif %}</div>
 </div>
 
 <div class="sheet" style="margin-top:1rem">
@@ -50,6 +51,7 @@
           <summary><strong>{{ t.title or t.name }}</strong>
             <div class="sub mono">{{ t.name }}</div>
             <div class="sub">{{ t.summary or t.error or "" }}</div></summary>
+          {% if t.cd_status in ("verified", "mismatch", "not-found") %}<p class="muted" style="margin:0.5rem 0 0">{{ cd_note(t) }}</p>{% endif %}
           <div class="stack" style="margin-top:0.75rem">
             {{ spectrogram(t) }}
             <div class="row">
@@ -83,7 +85,7 @@
       <td data-label="Format" class="mono">{{ t.sample_rate }}/{{ t.bits }}</td>
       <td data-label="Cutoff" class="num">{{ khz(t.metrics.cutoff_hz if t.metrics else none) }}</td>
       <td data-label="Verdict">{{ pill(t.effective_verdict) }}{% if t.ignored %} <span class="tag plain">ignored</span>{% endif %}
-        <div>{{ tags(t.final_categories or []) }}</div></td>
+        {{ cd_badge(t) }}<div>{{ tags(t.final_categories or []) }}</div></td>
     </tr>
   {% endfor %}
   </tbody>

@@ -93,3 +93,25 @@ def test_settings_page_marks_fields_fixed_by_the_environment(client):
     page = client.get("/settings").text
     assert "Fixed by the <code>LIBRARY_PATH</code> environment variable" in page
     assert "Fixed by the <code>WORKERS</code>" not in page
+
+
+def test_cd_filter_and_badge(client, monkeypatch):
+    from flac_inquisitor import cdverify
+
+    # No network in tests: every disc is unknown to the databases.
+    monkeypatch.setenv("CD_LOOKUP", "true")
+    monkeypatch.setattr(cdverify, "fetch", lambda url: None)
+    scan(client)
+    assert client.get("/api/tracks?verdict=all&cd=not-found").json()["total"] == 3
+    assert client.get("/api/tracks?verdict=all&cd=verified").json()["total"] == 0
+    key = client.get("/api/albums").json()["items"][0]["album_key"]
+    assert "CD verified 0/3" in client.get(f"/albums/{key}").text
+
+
+def test_cd_check_can_be_turned_off(client, monkeypatch):
+    from flac_inquisitor import cdverify
+
+    monkeypatch.setenv("CD_LOOKUP", "false")
+    monkeypatch.setattr(cdverify, "fetch", lambda url: pytest.fail("no lookups when turned off"))
+    scan(client)
+    assert client.get("/api/tracks?verdict=all&cd=unchecked").json()["total"] == 3

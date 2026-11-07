@@ -33,7 +33,10 @@ CREATE TABLE IF NOT EXISTS tracks (
     final_categories TEXT,
     error TEXT,
     analyzed_at TEXT,
-    missing INTEGER NOT NULL DEFAULT 0
+    missing INTEGER NOT NULL DEFAULT 0,
+    cd_status TEXT,                     -- verified | mismatch | not-found | unsupported, NULL if not checked
+    cd_ar INTEGER,                      -- AccurateRip confidence of the match
+    cd_ctdb INTEGER                     -- CTDB confidence of the match
 );
 CREATE INDEX IF NOT EXISTS tracks_album ON tracks(album_dir);
 CREATE INDEX IF NOT EXISTS tracks_album_key ON tracks(album_key);
@@ -70,7 +73,16 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS cd_lookups (
+    url TEXT PRIMARY KEY,
+    body BLOB,                          -- NULL when the database has no entry
+    fetched_at REAL NOT NULL
+);
 """
+
+# Columns added after the first release, for databases created before them.
+ADDED_COLUMNS = {"tracks": ["cd_status TEXT", "cd_ar INTEGER", "cd_ctdb INTEGER"]}
 
 JSON_COLUMNS = ("categories", "evidence", "metrics", "album_evidence", "final_categories")
 
@@ -99,6 +111,11 @@ def init() -> None:
     with connect() as conn:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA)
+        for table, columns in ADDED_COLUMNS.items():
+            existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+            for column in columns:
+                if column.split()[0] not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column}")
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:
