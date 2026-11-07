@@ -64,3 +64,10 @@ def test_settings_from_environment_are_locked(client):
     assert settings["library_path"]["locked"]
     response = client.put("/api/settings", json={"values": {"library_path": "/elsewhere"}})
     assert response.status_code == 400
+
+
+def test_assets_use_paths_behind_a_tls_proxy(client):
+    # Behind a reverse proxy the app sees plain HTTP; absolute http:// asset
+    # URLs would be blocked as mixed content on the https page.
+    page = client.get("/", headers={"X-Forwarded-Proto": "https"}).text
+    assert 'href="/static/style.css' in page and 'src="/static/app.js' in page
