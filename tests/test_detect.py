@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 from flac_inquisitor.detect import analyze_file
@@ -105,3 +106,41 @@ def test_soft_categories_make_a_file_suspect_at_most():
     assert grade(upsampled, frozenset({"upsampled"})) == "suspect"
     # Another cause still counts in full.
     assert grade(upsampled + [("fail", "lossy-transcode")], frozenset({"upsampled"})) == "fake"
+
+
+def _holes_measurements(hole_frames, n_frames=2_000):
+    """Flat high bands with band 5 dropping out in the given frames, as
+    hole_ratio sees them. 2,000 frames are about 93 seconds at 44.1 kHz."""
+    from flac_inquisitor.analyzer import HOLE_BAND_START, HOLE_BAND_WIDTH, Measurements
+
+    edges = np.arange(HOLE_BAND_START, 21_000, HOLE_BAND_WIDTH, dtype=float)
+    band_db = np.zeros((n_frames, len(edges)))
+    band_db[hole_frames, 5] = -40.0
+    return Measurements(
+        sample_rate=44_100, channels=2, bits_per_sample=16, decoded_samples=n_frames * 2048,
+        audio_md5="", decode_errors="", leading_zero_samples=0, freqs=np.zeros(1), mid_power=np.zeros(1),
+        band_edges=edges, band_db=band_db, frame_ref_db=np.zeros(n_frames),
+        block_trailing_zeros=np.zeros(0), block_count=0,
+    )
+
+
+def test_band_holes_spread_over_the_track_count():
+    from flac_inquisitor.detect import HOLES_MIN_COVER, hole_ratio
+
+    found = hole_ratio(_holes_measurements(np.arange(0, 2_000, 50)), None)
+    assert found["ratio"] == pytest.approx(0.02)
+    assert found["cover"] >= HOLES_MIN_COVER and found["burst"] < 0.9
+
+
+def test_band_holes_in_one_passage_do_not_count():
+    from flac_inquisitor.detect import HOLE_BURST_SHARE, HOLES_MIN_COVER, hole_ratio
+
+    # The same 40 holes, all within about 4 seconds: one tonal passage.
+    found = hole_ratio(_holes_measurements(np.arange(1_000, 1_080, 2)), None)
+    assert found["ratio"] == pytest.approx(0.02)
+    assert found["cover"] < HOLES_MIN_COVER
+
+    # In a 70-second track a 20-second passage covers 3 of 7 stretches, but
+    # all of its holes still fall within 30 seconds.
+    found = hole_ratio(_holes_measurements(np.arange(100, 520, 10), n_frames=1_500), None)
+    assert found["cover"] >= HOLES_MIN_COVER and found["burst"] >= HOLE_BURST_SHARE
