@@ -71,3 +71,19 @@ def test_assets_use_paths_behind_a_tls_proxy(client):
     # URLs would be blocked as mixed content on the https page.
     page = client.get("/", headers={"X-Forwarded-Proto": "https"}).text
     assert 'href="/static/style.css' in page and 'src="/static/app.js' in page
+
+
+def test_scan_of_one_folder(client):
+    response = client.post("/api/scan", json={"folder": "Artist/Album"})
+    assert response.status_code == 200 and response.json()["folder"] == "Artist/Album"
+    scanner._thread.join()
+    assert client.get("/api/scan").json()["total"] == 3
+
+
+@pytest.mark.parametrize("folder", ["../", "Artist/../../", "Nope"])
+def test_scan_refuses_folders_outside_the_library(client, folder):
+    assert client.post("/api/scan", json={"folder": folder}).status_code == 400
+
+
+def test_folders_lists_two_levels(client):
+    assert client.get("/api/folders").json() == ["Artist", "Artist/Album"]

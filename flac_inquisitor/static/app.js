@@ -190,7 +190,8 @@ const FI = (() => {
         $("[data-counts]", progress).textContent =
           `${s.done} of ${s.total} files · ${s.analyzed} analyzed · ${s.cached} unchanged · ${s.errors} errors${eta}`;
         $("[data-current]", progress).textContent = s.current || "";
-        $("[data-scan-text]", box).textContent = s.state === "stopping" ? "Stopping after the files in progress…" : "Scanning…";
+        $("[data-scan-text]", box).textContent = s.state === "stopping" ? "Stopping after the files in progress…"
+          : s.folder ? `Scanning ${s.folder}…` : "Scanning…";
       }
     }
 
@@ -203,7 +204,7 @@ const FI = (() => {
 
     start.addEventListener("click", async () => {
       try {
-        await api("POST", "/api/scan", { full: $("[data-full]", box).checked });
+        await api("POST", "/api/scan", { full: $("[data-full]", box).checked, folder: $("[data-folder]", box).value });
         box.dataset.state = "running";
         if (!timer) timer = setInterval(poll, 1000);
         poll();
@@ -211,6 +212,15 @@ const FI = (() => {
     });
     stop.addEventListener("click", () => api("DELETE", "/api/scan").then(poll));
     if (box.dataset.state !== "idle") { timer = setInterval(poll, 1000); poll(); }
+
+    // Folder suggestions, fetched once on first use: listing the library is
+    // not free on a large collection.
+    $("[data-folder]", box).addEventListener("focus", async () => {
+      const dl = $("#library-folders");
+      if (dl.childElementCount) return;
+      const { data } = await api("GET", "/api/folders").catch(() => ({ data: [] }));
+      dl.replaceChildren(...data.map((f) => Object.assign(document.createElement("option"), { value: f })));
+    }, { once: true });
   }
 
   function library() {
@@ -279,6 +289,19 @@ const FI = (() => {
     for (const d of $$("[data-details]", table)) d.addEventListener("toggle", () => { if (d.open) loadImages(d); });
     const hash = location.hash.match(/^#track-(\d+)$/);
     if (hash) { const row = $(`#track-${hash[1]}`); if (row) { $("[data-details]", row).open = true; row.focus(); } }
+
+    const rescan = $("[data-rescan]");
+    rescan.addEventListener("click", async () => {
+      try {
+        await api("POST", "/api/scan", { folder: rescan.dataset.albumDir, full: $("[data-rescan-full]").checked });
+      } catch (e) { toast(e.message, { error: true }); return; }
+      rescan.disabled = true;
+      const timer = setInterval(async () => {
+        const { data } = await api("GET", "/api/scan");
+        rescan.textContent = `Scanning… ${data.done}/${data.total}`;
+        if (data.state === "idle") { clearInterval(timer); location.reload(); }
+      }, 1000);
+    });
 
     $("[data-compare]").addEventListener("click", () => {
       const grid = $("[data-compare-grid]");

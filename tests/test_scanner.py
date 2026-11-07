@@ -107,3 +107,33 @@ def test_album_with_a_non_flac_file_gets_final_verdicts(library):
     t = tracks()
     assert t["Artist/[2020] Album/Disc 1/03. Renamed.flac"]["final_verdict"] == "fake"
     assert t["Artist/[2020] Album/Disc 1/01. Real.flac"]["final_verdict"] == "ok"
+
+
+def scan_folder(folder: str, full=False) -> dict:
+    s = scanner.Scanner()
+    s.start(full, folder)
+    s._thread.join()
+    return s.status()
+
+
+def test_folder_scan_only_touches_that_folder(library):
+    status = scan_folder("Artist/[2020] Album")
+    # The disc subfolders belong to the album; the other artist is left alone.
+    assert (status["total"], status["analyzed"]) == (3, 3)
+    assert set(tracks()) == {"Artist/[2020] Album/Disc 1/01. Real.flac", "Artist/[2020] Album/Disc 1/02. Tape.flac",
+                             "Artist/[2020] Album/Disc 2/01. Fake.flac"}
+
+
+def test_folder_scan_marks_missing_only_inside_the_folder(library):
+    scan()
+    (library / "Artist" / "[2020] Album" / "Disc 2" / "01. Fake.flac").unlink()
+    status = scan_folder("Artist/[2020] Album")
+    assert status["cached"] == 2
+    t = tracks()
+    assert t["Artist/[2020] Album/Disc 2/01. Fake.flac"]["missing"] == 1
+    assert t["Other/Single/renamed.flac"]["missing"] == 0
+
+
+def test_folder_scan_can_force_reanalysis(library):
+    scan()
+    assert scan_folder("Other/Single", full=True)["analyzed"] == 1

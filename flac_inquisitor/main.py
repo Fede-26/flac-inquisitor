@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -102,15 +103,47 @@ def scan_status() -> dict:
 
 class ScanRequest(BaseModel):
     full: bool = False
+    # Library-relative folder: an album, a disc or an artist. Empty for all.
+    folder: str | None = None
+
+
+def library_folder(folder: str | None) -> str | None:
+    """The folder as a clean library-relative path, None for the whole library."""
+    if not folder or not folder.strip("/ "):
+        return None
+    root = Path(settings.get("library_path")).resolve()
+    target = (root / folder.strip("/")).resolve()
+    # Only folders inside the library, never "../" tricks.
+    if not target.is_relative_to(root) or not target.is_dir():
+        raise HTTPException(400, f"{folder} is not a folder of the library.")
+    rel = target.relative_to(root).as_posix()
+    return None if rel == "." else rel
 
 
 @app.post("/api/scan")
 def scan_start(body: ScanRequest | None = None) -> dict:
     if error := library_ok():
         raise HTTPException(400, error)
-    if not scanner.start(full=bool(body and body.full)):
+    folder = library_folder(body.folder if body else None)
+    if not scanner.start(full=bool(body and body.full), folder=folder):
         raise HTTPException(409, "A scan is already running.")
     return scanner.status()
+
+
+@app.get("/api/folders")
+def api_folders() -> list[str]:
+    """Library folders two levels deep (artist, artist/album), for the folder
+    field of the scan form. Deeper folders can still be typed in."""
+    root = Path(settings.get("library_path"))
+    if not root.is_dir():
+        return []
+    out = []
+    for first in sorted(os.scandir(root), key=lambda e: e.name):
+        if first.is_dir() and not first.name.startswith("."):
+            out.append(first.name)
+            out += [f"{first.name}/{e.name}" for e in sorted(os.scandir(first.path), key=lambda e: e.name)
+                    if e.is_dir() and not e.name.startswith(".")]
+    return out
 
 
 @app.delete("/api/scan")

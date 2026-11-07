@@ -23,6 +23,8 @@
     <span class="muted" style="font-size:0.85rem"><kbd>j</kbd>/<kbd>k</kbd> move · <kbd>Enter</kbd> details · <kbd>s</kbd> spectrogram · <kbd>q</kbd> quarantine</span>
   </div>
   <div class="row">
+    <label class="row muted" style="font-weight:400"><input type="checkbox" data-rescan-full> Re-analyze</label>
+    <button data-rescan data-album-dir="{{ album.album_dir }}" {% if scanning %}disabled{% endif %}>Rescan album</button>
     <span class="muted" data-bulk-count></span>
     <button data-ignore-selected disabled>Ignore selected</button>
     <button class="danger" data-quarantine-selected disabled {% if scanning %}data-scanning{% endif %}>Quarantine selected</button>

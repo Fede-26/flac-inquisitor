@@ -92,9 +92,10 @@ def analyze_track(path: str) -> dict:
             "evidence": d["evidence"], "metrics": d["metrics"], "audio_md5": d["audio_md5"], "error": None}
 
 
-def list_flacs(root: Path, exclude: list[str]) -> list[str]:
+def list_flacs(root: Path, exclude: list[str], sub: str = "") -> list[str]:
+    """Paths relative to root, of the FLAC files under root/sub."""
     found = []
-    for dirpath, dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root / sub):
         dirnames.sort()
         rel_dir = os.path.relpath(dirpath, root)
         for name in sorted(filenames):
@@ -156,7 +157,8 @@ class Scanner:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._state = {"state": "idle", "total": 0, "done": 0, "cached": 0, "analyzed": 0, "errors": 0,
-                       "current": None, "started_at": None, "finished_at": None, "message": None}
+                       "current": None, "started_at": None, "finished_at": None, "message": None,
+                       "folder": None}
 
     def status(self) -> dict:
         with self._lock:
@@ -182,13 +184,14 @@ class Scanner:
     def running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def start(self, full: bool = False) -> bool:
+    def start(self, full: bool = False, folder: str | None = None) -> bool:
+        """folder: a library-relative folder to scan instead of the whole library."""
         if self.running:
             return False
         self._stop.clear()
         self._update(state="running", total=0, done=0, cached=0, analyzed=0, errors=0, current=None,
-                     started_at=time.time(), finished_at=None, message=None)
-        self._thread = threading.Thread(target=self._run, args=(full,), daemon=True)
+                     started_at=time.time(), finished_at=None, message=None, folder=folder)
+        self._thread = threading.Thread(target=self._run, args=(full, folder), daemon=True)
         self._thread.start()
         return True
 
@@ -197,21 +200,21 @@ class Scanner:
             self._stop.set()
             self._update(state="stopping")
 
-    def _run(self, full: bool) -> None:
+    def _run(self, full: bool, folder: str | None) -> None:
         try:
-            self._scan(full)
+            self._scan(full, folder)
         except Exception as exc:
             self._update(message=f"{type(exc).__name__}: {exc}")
             db.log("scan", f"Scan failed: {exc}")
         finally:
             self._update(state="idle", current=None, finished_at=time.time())
 
-    def _scan(self, full: bool) -> None:
+    def _scan(self, full: bool, folder: str | None) -> None:
         root = Path(settings.get("library_path"))
         if not root.is_dir():
             raise FileNotFoundError(f"library folder {root} does not exist")
         exclude = [p.strip() for p in settings.get("exclude").splitlines() if p.strip()]
-        files = list_flacs(root, exclude)
+        files = list_flacs(root, exclude, folder or "")
         self._update(total=len(files))
 
         with db.connect() as conn:
@@ -268,14 +271,18 @@ class Scanner:
                 self._bump("errors" if values.get("error") else "analyzed", rel)
 
         stopped = self._stop.is_set()
+        gone = []
         if not stopped:
             seen = set(files)
+            # A folder scan only knows about its own folder: files elsewhere
+            # were not looked for, so they are not missing.
+            gone = [p for p in existing if p not in seen and (folder is None or p.startswith(folder + "/"))]
             with db.connect() as conn:
-                gone = [p for p in existing if p not in seen]
                 conn.executemany("UPDATE tracks SET missing = 1 WHERE path = ?", [(p,) for p in gone])
-        recompute_albums()
+        recompute_albums(None if folder is None else {album_dir_of(p) for p in files + gone})
         s = self.status()
-        db.log("scan", f"Scan {'stopped' if stopped else 'finished'}: {s['analyzed']} analyzed, "
+        where = f" of {folder}" if folder else ""
+        db.log("scan", f"Scan{where} {'stopped' if stopped else 'finished'}: {s['analyzed']} analyzed, "
                        f"{s['cached']} unchanged, {s['errors']} errors.")
 
 

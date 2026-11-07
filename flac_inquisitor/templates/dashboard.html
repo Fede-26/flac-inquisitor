@@ -21,6 +21,9 @@
       </p>
     </div>
     <div class="row">
+      <input type="search" data-folder list="library-folders" placeholder="Whole library, or Artist/Album"
+             aria-label="Folder to scan" style="min-width:16rem">
+      <datalist id="library-folders"></datalist>
       <label class="row muted" style="font-weight:400"><input type="checkbox" data-full> Re-analyze everything</label>
       <button class="primary" data-scan-start {% if library_error %}disabled{% endif %}>Scan</button>
       <button data-scan-stop hidden>Stop</button>
