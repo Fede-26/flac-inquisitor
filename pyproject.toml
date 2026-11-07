@@ -1,0 +1,31 @@
+[project]
+name = "flac-inquisitor"
+version = "0.1.0"
+description = "Find FLAC files that are not really lossless: lossy transcodes, upsampled or padded hi-res, corrupt files."
+readme = "README.md"
+license = "GPL-3.0-or-later"
+requires-python = ">=3.15"
+dependencies = [
+    "fastapi",
+    "jinja2",
+    "numpy",
+    "python-multipart",
+    "scipy",
+    "uvicorn",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2",
+    "pytest",
+]
+
+[build-system]
+requires = ["uv_build>=0.13,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
