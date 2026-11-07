@@ -292,3 +292,36 @@ def _verdict(ev: list[Evidence], audio_md5: str, metrics: dict) -> Result:
 def analyze_file(path: str | Path) -> Result:
     info = read_flac_info(path)
     return evaluate(info, measure(path, info))
+
+
+# Album coherence. A track that differs from the rest of its album points to a
+# release assembled from several sources, even when each track alone passes.
+OUTLIER_CUTOFF_HZ = 2_000
+
+
+def album_coherence(tracks: list[dict]) -> dict[int, Evidence]:
+    """tracks: dicts with "format" ("44100/16") and "cutoff_hz" (None = no
+    hard cutoff). Returns evidence for the tracks that stand out, by index."""
+    if len(tracks) < 3:
+        return {}
+    out: dict[int, Evidence] = {}
+    formats = [t["format"] for t in tracks]
+    common = max(set(formats), key=formats.count)
+    # Only a clear majority defines what is normal: a 50/50 split has no outlier.
+    if formats.count(common) > len(formats) / 2:
+        for i, fmt in enumerate(formats):
+            if fmt != common:
+                out[i] = Evidence("album-format", "warn", f"This track is {fmt}, the rest of the album is {common}.",
+                                  "mixed-sources", fmt, common)
+
+    def effective(t: dict) -> float:
+        rate = int(t["format"].split("/")[0])
+        return t["cutoff_hz"] if t["cutoff_hz"] is not None else rate / 2
+
+    cutoffs = [effective(t) for t in tracks]
+    median = float(np.median(cutoffs))
+    for i, c in enumerate(cutoffs):
+        if median - c >= OUTLIER_CUTOFF_HZ and i not in out:
+            out[i] = Evidence("album-cutoff", "warn", f"This track stops at {c / 1000:.1f} kHz, the album "
+                              f"typically at {median / 1000:.1f} kHz.", "mixed-sources", c, f"{median:.0f} Hz")
+    return out

@@ -58,3 +58,22 @@ def test_evidence_is_serializable(samples):
     import json
 
     json.dumps(verdict(samples, "mp3_128").to_dict())
+
+
+def test_album_coherence_flags_the_odd_track():
+    from flac_inquisitor.detect import album_coherence
+
+    tracks = [{"format": "44100/16", "cutoff_hz": None} for _ in range(5)]
+    tracks[2] = {"format": "44100/16", "cutoff_hz": 16_000.0}
+    tracks[4] = {"format": "48000/24", "cutoff_hz": None}
+    flagged = album_coherence(tracks)
+    assert set(flagged) == {2, 4}
+    assert flagged[2].check == "album-cutoff"
+    assert flagged[4].check == "album-format"
+
+
+def test_album_coherence_needs_a_majority():
+    from flac_inquisitor.detect import album_coherence
+
+    tracks = [{"format": f, "cutoff_hz": None} for f in ("44100/16", "44100/16", "48000/24", "48000/24")]
+    assert album_coherence(tracks) == {}
