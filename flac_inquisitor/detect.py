@@ -20,7 +20,7 @@ from flac_inquisitor.flacmeta import FlacInfo, read_flac_info
 
 # Bump whenever a threshold or a check changes: stored results with an older
 # version are re-analyzed on the next scan.
-ALGO_VERSION = 5
+ALGO_VERSION = 6
 
 # Thresholds, calibrated on 07/11/2026 against 58 tracks of a real library and
 # fakes made from them with LAME, AAC, Opus, Vorbis and ffmpeg's resampler
@@ -66,6 +66,20 @@ HOLES_MIN_COVER = 0.30
 HOLE_BURST_WINDOWS = 3
 HOLE_BURST_SHARE = 0.90
 HOLE_BURST_MIN_WINDOWS = 6
+# The same holes in short frames (analyzer.SHORT_FFT_SIZE), in the mid or the
+# side channel, which catch encoders that keep the full band. Calibration on
+# 241 CD-verified tracks and 9 lossy fakes made from each: no genuine track
+# reached 0.5 % with holes in at least half of its 10-second stretches. Fakes
+# that did: LAME V0 224 of 241, MP3 320 kbps 222, ffmpeg AAC 256 kbps 179,
+# Vorbis q9 140; at 1 %: 215, 189, 157 and 118. Genuine tracks with a tonal
+# passage reached 4 %, but in at most a third of the stretches, hence the
+# stricter cover than for the long frames. Holes are looked for up to Nyquist,
+# not to the cutoff: encoders drop bands just below their low-pass, and the
+# cutoff limit lost a third of the Vorbis q9 fakes without sparing a genuine
+# track.
+SHORT_HOLES_SUSPECT = 0.005
+SHORT_HOLES_FAKE = 0.01
+SHORT_HOLES_MIN_COVER = 0.5
 # Per-frame bandwidth: the highest band still above FRAME_TOP_FLOOR_DB
 # (relative to the frame's 1-10 kHz level), at the 10th percentile of loud
 # frames. High-bitrate MP3 and Vorbis switch the top bands off now and then,
@@ -186,20 +200,26 @@ def hires_floor(m: Measurements) -> dict:
             "edge": edge, "top": top}
 
 
-def hole_ratio(m: Measurements, cutoff_hz: float | None) -> dict | None:
+def hole_ratio(m: Measurements, cutoff_hz: float | None, band_db: np.ndarray | None = None,
+               ref_db: np.ndarray | None = None, hop: int = HOP) -> dict | None:
     """Share of loud frames where a high band vanishes while the bands on both
     sides keep playing: the encoder giving up on that band for a moment.
 
     Also how the holes spread over the track: cover is the share of the
     HOLE_WINDOW_S stretches with loud frames that contain a hole, burst the
     largest share of the holes within HOLE_BURST_WINDOWS consecutive stretches
-    (None for tracks too short to tell)."""
-    if m.band_db.size == 0:
+    (None for tracks too short to tell).
+
+    band_db, ref_db and hop default to the long frames; pass the short ones to
+    look at those instead."""
+    band_db = m.band_db if band_db is None else band_db
+    ref_db = m.frame_ref_db if ref_db is None else ref_db
+    if band_db.size == 0:
         return None
     top = (cutoff_hz or m.sample_rate / 2) - 500
     bands = m.band_edges + 500 <= top
-    loud = m.frame_ref_db >= np.median(m.frame_ref_db) - 10
-    cells = m.band_db[loud][:, bands]
+    loud = ref_db >= np.median(ref_db) - 10
+    cells = band_db[loud][:, bands]
     if len(cells) < 20:
         return None
     typical = np.median(cells, axis=0)
@@ -212,7 +232,7 @@ def hole_ratio(m: Measurements, cutoff_hz: float | None) -> dict | None:
     playing = cells >= typical - HOLE_NEIGHBOUR_DB
     isolated = low[:, 1:-1] & playing[:, :-2] & playing[:, 2:]
     hit = isolated.any(axis=1)
-    window = (np.flatnonzero(loud) * HOP / m.sample_rate // HOLE_WINDOW_S).astype(int)
+    window = (np.flatnonzero(loud) * hop / m.sample_rate // HOLE_WINDOW_S).astype(int)
     loud_windows = len(np.unique(window))
     cover = len(np.unique(window[hit])) / loud_windows
     burst = None
@@ -220,6 +240,18 @@ def hole_ratio(m: Measurements, cutoff_hz: float | None) -> dict | None:
         counts = np.bincount(window[hit], minlength=window.max() + 1)
         burst = float(np.convolve(counts, np.ones(HOLE_BURST_WINDOWS), "valid").max() / hit.sum())
     return {"ratio": float(hit.mean()), "bands": int(active.sum()), "cover": cover, "burst": burst}
+
+
+def short_holes(m: Measurements) -> dict | None:
+    """Band holes in the short frames, for the mid and, in stereo files, the
+    side channel (see SHORT_HOLES_SUSPECT). Each is None when it has too little
+    high-frequency content."""
+    if m.short_band_db is None:
+        return None
+    found = {"mid": hole_ratio(m, None, m.short_band_db, m.short_ref_db, m.short_hop)}
+    if m.short_side_db is not None:
+        found["side"] = hole_ratio(m, None, m.short_side_db, m.short_ref_db, m.short_hop)
+    return found
 
 
 def frame_top(m: Measurements) -> float | None:
@@ -329,6 +361,38 @@ def evaluate(info: FlacInfo, m: Measurements, soft: frozenset[str] = frozenset()
     else:
         ev.append(Evidence("hf-holes", "pass", f"High bands are continuous ({holes:.2%} of loud moments with "
                            f"isolated dropouts, {found['bands']} bands checked).", value=holes))
+
+    short = short_holes(m)
+    if short is not None and not any(short.values()):
+        ev.append(Evidence("hf-holes-short", "info", "Not enough high-frequency content to look for dropouts in "
+                           "short frames."))
+    elif short is not None:
+        for name, found in short.items():
+            metrics[f"short_{name}_hole_ratio"] = found and found["ratio"]
+            metrics[f"short_{name}_hole_cover"] = found and found["cover"]
+        # Only holes spread over the track count, as for the long frames.
+        spread = {name: found for name, found in short.items() if found and found["cover"] >= SHORT_HOLES_MIN_COVER
+                  and not (found["burst"] is not None and found["burst"] >= HOLE_BURST_SHARE)}
+        name, found = max(spread.items(), key=lambda item: item[1]["ratio"], default=(None, None))
+        where = {"mid": "the mid channel (left plus right)", "side": "the side channel (left minus right)"}.get(name)
+        peak = max((f["ratio"] for f in short.values() if f), default=0.0)
+        if found and found["ratio"] >= SHORT_HOLES_FAKE:
+            ev.append(Evidence("hf-holes-short", "fail", f"Looked at in short frames, a high band of {where} vanishes "
+                               f"in {found['ratio']:.1%} of loud moments, in {found['cover']:.0%} of the track's "
+                               f"{HOLE_WINDOW_S:g}-second stretches: an encoder dropping bands.", "lossy-transcode",
+                               found["ratio"], f">= {SHORT_HOLES_FAKE:.1%}"))
+        elif found and found["ratio"] >= SHORT_HOLES_SUSPECT:
+            ev.append(Evidence("hf-holes-short", "warn", f"Looked at in short frames, a high band of {where} vanishes "
+                               f"in {found['ratio']:.1%} of loud moments, in {found['cover']:.0%} of the track's "
+                               f"{HOLE_WINDOW_S:g}-second stretches.", "lossy-transcode", found["ratio"],
+                               f">= {SHORT_HOLES_SUSPECT:.1%}"))
+        elif peak >= SHORT_HOLES_SUSPECT:
+            ev.append(Evidence("hf-holes-short", "info", f"Looked at in short frames, a high band vanishes in "
+                               f"{peak:.1%} of loud moments, but in one passage of the track only, such as a synth "
+                               "lead with sparse harmonics, not an encoder. Not counted.", value=peak))
+        else:
+            ev.append(Evidence("hf-holes-short", "pass", f"High bands are continuous in short frames too ({peak:.2%} "
+                               "of loud moments with isolated dropouts).", value=peak))
 
     top = frame_top(m)
     metrics["frame_top_hz"] = top

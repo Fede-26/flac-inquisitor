@@ -27,8 +27,8 @@ audio. It is good at the common cases and wrong on some files:
 - **False positives.** Old tape recordings, lo-fi productions and music made at
   32 kHz can look like transcodes. A CD that was itself mastered from MP3s is
   flagged even though the rip is perfect.
-- **False negatives.** High-bitrate MP3 (V0, 320 kbps) and Vorbis can leave no
-  trace that the checks recognise.
+- **False negatives.** Some high-bitrate MP3, AAC and Vorbis files, and most
+  Opus files, leave no trace beyond a cutoff that genuine masters can share.
 
 Treat a verdict as a reason to look and listen, not as a proof. See
 [Limits and false positives](docs/explanation/limits.md).

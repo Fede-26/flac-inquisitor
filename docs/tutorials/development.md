@@ -33,8 +33,7 @@ uv run pytest
 The first run takes longer: `tests/conftest.py` synthesises a few seconds of
 pink noise and turns it into real FLAC files and real fakes with ffmpeg (MP3 at
 128 and 320 kbps, AAC, Opus, an upsampled copy, a padded 24-bit copy and more).
-No real music is used. Every test should pass; one is marked `xfail` because it
-documents a known blind spot.
+No real music is used. Every test should pass.
 
 If a fixture fails with an ffmpeg error such as `Unknown encoder 'libmp3lame'`,
 your ffmpeg lacks that encoder. Install a full build.

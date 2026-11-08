@@ -63,10 +63,12 @@ mono masters.
 
 ### High-bitrate lossy files
 
-MP3 at 320 kbps or V0 and Vorbis at high quality keep almost the full band. Their cutoff is at 19 to 20.5 kHz or absent, and they drop
-fewer bands. In calibration, a part of the LAME V0 and Vorbis q9 fakes passed
-every check that affects the verdict. The test suite marks one such case as an
-expected failure: LAME V0 keeps the full band on stationary noise.
+MP3 at 320 kbps or V0, AAC at 256 kbps and Vorbis at high quality keep almost
+the full band. Their cutoff is at 19 to 20.5 kHz or absent, and they drop few
+bands, briefly. The short-frame hole check catches most of them, but in
+calibration one in twenty LAME V0, a quarter of the AAC 256 and over a third
+of the Vorbis q9 fakes still passed. Opus keeps every band up to its 20 kHz
+limit: only its cutoff, a warning, gives it away.
 
 These files are also the ones that sound closest to the original.
 
@@ -89,9 +91,9 @@ first and gives the verdict; the lossy origin may also show as a cutoff below
 
 ## What the measurements do not see
 
-- **The side channel.** The spectral checks analyze the mid channel,
-  $(L + R) / 2$. Some encoders treat the difference between channels more
-  harshly than the sum; traces only in the side channel are missed.
+- **The side channel, except for holes.** The cutoff and the per-frame
+  bandwidth analyze the mid channel, $(L + R) / 2$. Only the short-frame hole
+  check also looks at the difference between the channels.
 - **Content below 11 kHz.** Band holes are only looked for from 11 kHz up.
 - **Very short tracks.** Band holes and per-frame bandwidth need at least 20
   loud frames, about one second of loud music at 44.1 kHz. Bit depth needs 10

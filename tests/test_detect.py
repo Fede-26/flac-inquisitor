@@ -38,10 +38,12 @@ def test_high_bitrate_lossy_is_at_least_suspect(samples, name):
     assert "lossy-transcode" in result.categories
 
 
-@pytest.mark.xfail(reason="ffmpeg's LAME V0 keeps the full band on stationary noise; "
-                   "band dropouts need real music to show up (calibration step)")
-def test_mp3_v0_is_suspect(samples):
-    assert verdict(samples, "mp3_v0").verdict != "ok"
+def test_mp3_v0_is_caught(samples):
+    # LAME V0 keeps the full band on stationary noise; only the short frames
+    # of the side channel show its dropped bands.
+    result = verdict(samples, "mp3_v0")
+    assert result.verdict != "ok", result.summary
+    assert "lossy-transcode" in result.categories
 
 
 def test_audio_md5_matches_streaminfo(samples):
@@ -144,3 +146,20 @@ def test_band_holes_in_one_passage_do_not_count():
     # all of its holes still fall within 30 seconds.
     found = hole_ratio(_holes_measurements(np.arange(100, 520, 10), n_frames=1_500), None)
     assert found["cover"] >= HOLES_MIN_COVER and found["burst"] >= HOLE_BURST_SHARE
+
+
+def test_short_frames_look_at_the_side_channel():
+    from flac_inquisitor.detect import SHORT_HOLES_MIN_COVER, short_holes
+
+    # Short frames of 512 samples: 8,000 are about 93 seconds. Holes only in
+    # the side channel, spread over the whole track.
+    m = _holes_measurements([])
+    m.short_hop = 512
+    m.short_ref_db = np.zeros(8_000)
+    m.short_band_db = np.zeros((8_000, len(m.band_edges)))
+    m.short_side_db = np.zeros((8_000, len(m.band_edges)))
+    m.short_side_db[np.arange(0, 8_000, 100), 5] = -40.0
+    found = short_holes(m)
+    assert found["mid"]["ratio"] == 0
+    assert found["side"]["ratio"] == pytest.approx(0.01)
+    assert found["side"]["cover"] >= SHORT_HOLES_MIN_COVER

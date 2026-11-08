@@ -1,7 +1,7 @@
 # Checks, categories and verdicts
 
 This page lists every piece of evidence the detector can produce, with its
-thresholds, as of `ALGO_VERSION` 5. The constants live in
+thresholds, as of `ALGO_VERSION` 6. The constants live in
 `flac_inquisitor/detect.py`. For why each check works, see
 [The spectral algorithms](../explanation/spectral-algorithms.md) and
 [Bit depth, integrity and the other measurements](../explanation/bit-depth-and-integrity.md).
@@ -34,7 +34,7 @@ counts as **ok**.
 
 | Category | Label | Raised by |
 |---|---|---|
-| `lossy-transcode` | Lossy transcode | `cutoff`, `hf-holes` |
+| `lossy-transcode` | Lossy transcode | `cutoff`, `hf-holes`, `hf-holes-short` |
 | `upsampled` | Upsampled | `hires-content` |
 | `padded-bits` | Padded bits | `bit-depth` |
 | `lossywav` | lossyWAV | `bit-depth` |
@@ -90,6 +90,21 @@ the cutoff in Hz.
 A hole: a 500 Hz band at least 25 dB (`HOLE_DROP_DB`) below its typical level
 while both neighbours are within 10 dB (`HOLE_NEIGHBOUR_DB`) of theirs. Value:
 the share of loud frames, 0 to 1.
+
+### Band holes in short frames
+
+| Check | Result | Category | Condition |
+|---|---|---|---|
+| `hf-holes-short` | fail | `lossy-transcode` | ≥ 1 % of loud short frames have an isolated hole, in the mid or the side channel (`SHORT_HOLES_FAKE`), spread over the track. |
+| `hf-holes-short` | warn | `lossy-transcode` | ≥ 0.5 % (`SHORT_HOLES_SUSPECT`), spread over the track. |
+| `hf-holes-short` | info | — | ≥ 0.5 %, but in one passage: in fewer than 50 % of the 10-second stretches (`SHORT_HOLES_MIN_COVER`), or, in tracks of at least 6 stretches, ≥ 90 % of them within 30 seconds. |
+| `hf-holes-short` | pass | — | Below 0.5 %. |
+| `hf-holes-short` | info | — | Fewer than 20 loud short frames or fewer than 3 bands with content, in both channels. |
+
+The same holes as above, in frames of 1,024 samples (2,048 at 88.2 kHz and
+up) instead of 4,096, up to Nyquist, in the mid and, for stereo files, the side
+channel. The channel with the higher ratio among those spread over the track
+decides. Value: that share, 0 to 1.
 
 ### Per-frame bandwidth
 
@@ -171,6 +186,10 @@ calibration table.
 | `hole_ratio` | 0–1 | Share of loud frames with an isolated band hole; `null` when not measurable. |
 | `hole_cover` | 0–1 | Share of the 10-second stretches with loud frames that contain a hole. |
 | `hole_burst` | 0–1 | Largest share of the holes within 30 seconds; `null` without holes or for tracks under 6 stretches. |
+| `short_mid_hole_ratio` | 0–1 | As `hole_ratio`, in short frames of the mid channel. |
+| `short_mid_hole_cover` | 0–1 | As `hole_cover`, in short frames of the mid channel. |
+| `short_side_hole_ratio` | 0–1 | As `hole_ratio`, in short frames of the side channel; absent for mono files. |
+| `short_side_hole_cover` | 0–1 | As `hole_cover`, in short frames of the side channel. |
 | `frame_top_hz` | Hz | 10th percentile of the per-frame top band edge. |
 | `hires_step_db` | dB | Hi-res only: largest step between 20 and 26 kHz. |
 | `hires_flat_db` | dB | Hi-res only: range of levels from 27 kHz up. |

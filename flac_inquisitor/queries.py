@@ -219,6 +219,12 @@ ACCURACY_METRICS = [
     ("cutoff_drop_db", "Steepest edge found", "dB", "high", [("cutoff from", detect.CUTOFF_MIN_DROP_DB)]),
     ("hole_ratio", "Loud moments with band holes", "%", "high",
      [("suspect from", detect.HOLES_SUSPECT), ("fake from", detect.HOLES_FAKE)]),
+    # Counted only when the holes cover at least SHORT_HOLES_MIN_COVER of the
+    # track; the tail shows how close genuine tracks come.
+    ("short_mid_hole_ratio", "Loud moments with band holes, short frames, mid", "%", "high",
+     [("suspect from", detect.SHORT_HOLES_SUSPECT), ("fake from", detect.SHORT_HOLES_FAKE)]),
+    ("short_side_hole_ratio", "Loud moments with band holes, short frames, side", "%", "high",
+     [("suspect from", detect.SHORT_HOLES_SUSPECT), ("fake from", detect.SHORT_HOLES_FAKE)]),
     ("blocks_with_unused_bits", "Blocks with unused low bits", "%", "high",
      [("suspect from", detect.LOSSYWAV_SUSPECT_RATIO), ("fake from", detect.LOSSYWAV_FAKE_RATIO)]),
     ("frame_top_hz", "Per-frame bandwidth, 10th percentile", "kHz", "low",

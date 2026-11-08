@@ -30,6 +30,10 @@ Two things are kept from the spectra:
    Relative levels make loud and quiet passages comparable. Below 11 kHz, MP3
    encoders rarely drop whole bands at usual bitrates, so lower bands are not
    kept.
+3. The same band levels from **short frames** of 1,024 samples (hop 512), for
+   the mid channel and for the **side channel** $s = (L - R) / 2$, both
+   relative to the mid's $R_t$ of the same short frame. At 88.2 kHz and above
+   the frame is 2,048 samples or more, so it always lasts 21 to 23 ms.
 
 All levels below are in dB relative to the 1–10 kHz mean of the same spectrum.
 
@@ -142,6 +146,47 @@ cover of 0.06 to 0.10, or, for a 72-second track, a burst of 1.00.
 
 A fake whose only lossy trace sits in one passage is missed this way, and so is
 a short insert of lossy audio: see [Limits](limits.md).
+
+### Holes in short frames and in the side channel
+
+A 4,096-sample frame lasts 93 ms. An MP3 or AAC frame is about 1,000 samples
+long, so a band the encoder drops for one of its frames fills a quarter of the
+analysis frame at most, and the average over the frame hides it. High-bitrate
+encoders drop bands rarely and briefly, which is why LAME V0 and Vorbis q9
+often had too few long-frame holes to warn.
+
+Encoders that code the two channels jointly also spend fewer bits on the
+difference between them than on their sum, and drop its bands more often.
+
+So the same hole search runs again on the short frames, once on the mid and
+once on the side channel, with three differences:
+
+- bands go up to Nyquist, not to the cutoff: encoders drop bands just below
+  their low-pass, and stopping at the cutoff lost a third of the Vorbis q9
+  fakes without sparing a genuine track;
+- the holes must cover at least half of the 10-second stretches, not 30 %:
+  short frames catch more tonal moments, and genuine tracks with a tonal
+  passage reached a ratio of 4 % in up to a third of the stretches;
+- 0.5 % warns and 1 % fails.
+
+The channel with the higher ratio decides. A mono file has no side channel; a
+mono recording stored as stereo has a silent one, whose bands are empty and
+dropped.
+
+**Calibration.** 241 CD-verified tracks of a real library and 9 lossy fakes of
+each, made with current encoders:
+
+| Source | Short-frame holes, ≥ 0.5 % and spread | ≥ 1 % and spread |
+|---|---|---|
+| Genuine (CD-verified) | 0 | 0 |
+| LAME V0 | 224 | 215 |
+| MP3 320 kbps | 222 | 189 |
+| ffmpeg AAC 256 kbps | 179 | 157 |
+| Vorbis q9 | 140 | 118 |
+| Opus 160 kbps | 18 | 7 |
+
+Opus codes the full band up to its 20 kHz limit without dropping bands; its
+cutoff is what flags it.
 
 ## Per-frame bandwidth
 

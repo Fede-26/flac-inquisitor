@@ -31,6 +31,14 @@ HOLE_BAND_STOP = 24_000
 
 REF_BAND = (1_000, 10_000)
 
+# The same hole bands seen through short frames, in the mid and the side
+# channel. MP3 and AAC frames are about 1,000 samples long, so a band an encoder
+# drops for one frame is a fraction of a 4096-sample window, and gets averaged
+# away. Encoders also treat the side channel more harshly than the mid.
+# Measured at 44.1 and 48 kHz; at higher rates the frame grows with the rate,
+# so the time per frame and the memory per minute stay the same.
+SHORT_FFT_SIZE = 1024
+
 
 @dataclass
 class Measurements:
@@ -50,6 +58,12 @@ class Measurements:
     block_count: int  # non-silent blocks, loud or not
     channel_diff: float | None = None  # stereo only: share of non-silent frames where left and right differ
     cd: dict | None = None  # CD database checksums (cdverify), for CD-format files only
+    # Short frames (SHORT_FFT_SIZE): hole bands of the mid and side channel,
+    # both relative to the mid's reference band, as band_db; None for mono.
+    short_hop: int = 0
+    short_band_db: np.ndarray | None = None
+    short_side_db: np.ndarray | None = None
+    short_ref_db: np.ndarray | None = None
 
 
 class DecodeError(RuntimeError):
@@ -104,6 +118,18 @@ def measure(path: str | Path, info: FlacInfo) -> Measurements:
     for b, edge in enumerate(band_edges):
         band_matrix[(freqs >= edge) & (freqs < edge + HOLE_BAND_WIDTH), b] = 1.0
     band_matrix /= np.maximum(band_matrix.sum(axis=0), 1)
+
+    short_size = SHORT_FFT_SIZE * max(1, sr // 44_100)
+    short_hop = short_size // 2
+    short_freqs = np.fft.rfftfreq(short_size, 1 / sr)
+    short_window = np.hanning(short_size)
+    short_ref_bins = (short_freqs >= REF_BAND[0]) & (short_freqs < REF_BAND[1])
+    short_matrix = np.zeros((len(short_freqs), len(band_edges)))
+    for b, edge in enumerate(band_edges):
+        short_matrix[(short_freqs >= edge) & (short_freqs < edge + HOLE_BAND_WIDTH), b] = 1.0
+    short_matrix /= np.maximum(short_matrix.sum(axis=0), 1)
+    short_carry = np.zeros((0, channels), dtype=np.int32)
+    short_mid_rows, short_side_rows, short_ref_rows = [], [], []
 
     mid_sum = np.zeros(len(freqs))
     frame_count = 0
@@ -176,6 +202,27 @@ def measure(path: str | Path, info: FlacInfo) -> Measurements:
             else:
                 carry = data
 
+            # The same for the short frames. Levels are relative, so no
+            # window normalisation is needed.
+            data = np.concatenate([short_carry, chunk]) if len(short_carry) else chunk
+            if len(data) >= short_size:
+                as_float = data.astype(np.float64)
+                n_frames = (len(data) - short_size) // short_hop + 1
+                idx = np.arange(short_size)[None, :] + short_hop * np.arange(n_frames)[:, None]
+                left = as_float[:, 0]
+                spec = np.abs(np.fft.rfft(((left + as_float[:, 1]) / 2 if channels >= 2 else left)[idx]
+                                          * short_window, axis=1)) ** 2
+                ref_db = 10 * np.log10(spec[:, short_ref_bins].mean(axis=1) + 1e-30)
+                short_ref_rows.append(ref_db.astype(np.float32))
+                short_mid_rows.append((10 * np.log10(spec @ short_matrix + 1e-30) - ref_db[:, None]).astype(np.float32))
+                if channels >= 2:
+                    spec = np.abs(np.fft.rfft(((left - as_float[:, 1]) / 2)[idx] * short_window, axis=1)) ** 2
+                    short_side_rows.append((10 * np.log10(spec @ short_matrix + 1e-30)
+                                            - ref_db[:, None]).astype(np.float32))
+                short_carry = data[n_frames * short_hop :]
+            else:
+                short_carry = data
+
         err.seek(0)
         errors = err.read().decode("utf-8", "replace").strip()
 
@@ -204,4 +251,8 @@ def measure(path: str | Path, info: FlacInfo) -> Measurements:
         block_count=block_count,
         channel_diff=differing / sounding if sounding else None,
         cd=cd_result,
+        short_hop=short_hop,
+        short_band_db=np.concatenate(short_mid_rows) if short_mid_rows else None,
+        short_side_db=np.concatenate(short_side_rows) if short_side_rows else None,
+        short_ref_db=np.concatenate(short_ref_rows) if short_ref_rows else None,
     )

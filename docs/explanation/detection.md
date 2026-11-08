@@ -30,6 +30,12 @@ moment, while the bands on both sides keep playing. Music does not do that: an
 instrument's overtones do not vanish in one narrow band and stay in the next.
 The **band holes** check counts these moments.
 
+High-bitrate encoders drop bands rarely, and only for one of their frames, a
+few hundredths of a second. A second look with shorter analysis frames catches
+these brief holes. It also looks at the difference between the two channels,
+which encoders that code the channels jointly treat more harshly than their
+sum.
+
 High-bitrate encoders keep the top bands most of the time but still switch them
 off now and then. The **per-frame bandwidth** measurement looks at how often
 the top of the spectrum goes dark. It is measured and shown, not yet used for
@@ -87,7 +93,7 @@ flowchart TD
     D --> M[measurements:<br/>spectra, per-frame bands,<br/>bit usage, MD5, CD checksums]
     M --> C1[integrity]
     M --> C2[cutoff]
-    M --> C3[band holes]
+    M --> C3[band holes,<br/>long and short frames]
     M --> C4[hi-res content]
     M --> C5[bit depth]
     M --> C6[hints: mono, ID3,<br/>vendor, bitrate…]
