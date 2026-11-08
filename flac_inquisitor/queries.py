@@ -30,6 +30,7 @@ RANK_NAME = {3: "fake", 2: "error", 1: "suspect", 0: "ok"}
 # Outcome of the CD database check (cdverify), as a filter.
 CD_FILTERS = {
     "verified": "t.cd_status = 'verified'",
+    "not-verified": "(t.cd_status IS NULL OR t.cd_status != 'verified')",
     "mismatch": "t.cd_status = 'mismatch'",
     "not-found": "t.cd_status = 'not-found'",
     "unchecked": "(t.cd_status IS NULL OR t.cd_status = 'unsupported')",

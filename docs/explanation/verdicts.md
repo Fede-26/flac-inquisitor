@@ -104,5 +104,7 @@ different questions:
 - CD verification says whether the file is a perfect copy of a pressed CD.
 
 Both can be true at once: a perfect rip of a CD mastered from MP3s. The app
-shows both, and lets you decide. The Accuracy page uses the overlap to find
-checks that are too strict.
+keeps both. The Albums and Tracks lists leave verified CD rips out by default,
+since no other copy of that edition can be better; the Dashboard counters, the
+album pages and the Accuracy page still include them. The Accuracy page uses
+the overlap to find checks that are too strict.

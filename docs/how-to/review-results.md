@@ -6,18 +6,22 @@ each one needs.
 ## Start from the worst albums
 
 1. Open **Albums** in the top bar. By default it lists albums with at least one
-   **Fake** or **Suspect** track, most serious first.
+   **Fake** or **Suspect** track that is not a verified CD rip, most serious
+   first.
 2. Narrow the list with the filters, then press **Apply**:
    - **Verdict** chips: *Fake*, *Suspect*, *Unreadable*, *OK*.
    - **Cause**: one category, such as *Lossy transcode* or *Upsampled*.
    - **Format**: one sample rate and bit depth, such as `96000 Hz / 24 bit`.
-   - **CD check**: *CD verified*, *Not matching*, *Unknown disc*, *Not checked*.
+   - **CD check**: *Not CD verified* (the default), *Any*, *CD verified*,
+     *Not matching*, *Unknown disc*, *Not checked*. Choose *Any* to see
+     flagged tracks that are verified CD rips too.
    - **Sort**: *Most serious first*, *Artist*, *Album*, *Lowest cutoff*.
    - **Search**: part of an artist, album, title or path.
 3. Switch to **Tracks** at the top right to see the same filter as single files.
 
 The Dashboard counters and the **By cause** table link to these lists with the
-filter already set.
+filter already set. The counters include verified CD rips, so a list can be
+shorter than the number that links to it.
 
 ## Judge one album
 

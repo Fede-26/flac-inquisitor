@@ -63,7 +63,7 @@
   <a class="sheet stat" href="/tracks?verdict=all&cd=verified">
     <div class="value">{{ summary.cd_verified }}</div><div class="label">tracks verified as CD rips, {{ summary.cd_albums }} whole album(s)</div>
   </a>
-  <a class="sheet stat" href="/albums?verdict=all">
+  <a class="sheet stat" href="/albums?verdict=all&cd=">
     <div class="value">{{ summary.tracks }}</div>
     <div class="label">tracks in total{% if summary.by_verdict.error %}, {{ summary.by_verdict.error }} unreadable{% endif %}{% if summary.ignored %}, {{ summary.ignored }} ignored{% endif %}</div>
   </a>

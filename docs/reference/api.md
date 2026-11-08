@@ -30,7 +30,7 @@ parameters:
 | `verdict` | Repeatable: `fake`, `suspect`, `ok`, `error`; or `all` for no filter. | `fake` and `suspect` |
 | `category` | A category id, such as `lossy-transcode`. Ignored tracks never match. | any |
 | `fmt` | `<sample rate>/<bits>`, such as `44100/16`. | any |
-| `cd` | `verified`, `mismatch`, `not-found`, `unchecked`. | any |
+| `cd` | `not-verified`, `verified`, `mismatch`, `not-found`, `unchecked`; empty (`cd=`) for no filter. | `not-verified` |
 | `q` | Text found in the path, artist, album or title. | none |
 | `sort` | `severity`, `artist`, `album`, `cutoff`. | `severity` |
 | `page` | Page number, 50 rows per page. | `1` |

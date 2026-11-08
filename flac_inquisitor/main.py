@@ -39,6 +39,11 @@ def filters_from(verdict: list[str] | None, category: str | None, fmt: str | Non
     # "all" in the query string means no verdict filter.
     if verdict == ["all"]:
         verdicts = []
+    # A bit-exact CD rip is as good as the file can get, whatever its spectrum
+    # shows, so the lists leave verified tracks out unless asked: an empty cd
+    # (the "Any" choice of the form) means no CD filter.
+    if cd is None:
+        cd = "not-verified"
     return queries.Filters(verdicts=verdicts, category=category or None, fmt=fmt or None, q=q or None,
                            cd=cd or None, sort=sort, page=max(page_no, 1))
 

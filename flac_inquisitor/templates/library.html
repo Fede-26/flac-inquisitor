@@ -31,7 +31,7 @@
   </label>
   <label>CD check
     <select name="cd">
-      {% for v, label in [("", "Any"), ("verified", "CD verified"), ("mismatch", "Not matching"), ("not-found", "Unknown disc"), ("unchecked", "Not checked")] %}
+      {% for v, label in [("not-verified", "Not CD verified"), ("", "Any"), ("verified", "CD verified"), ("mismatch", "Not matching"), ("not-found", "Unknown disc"), ("unchecked", "Not checked")] %}
       <option value="{{ v }}" {% if v == (filters.cd or "") %}selected{% endif %}>{{ label }}</option>
       {% endfor %}
     </select>

@@ -40,7 +40,8 @@ Ignore a track when you have looked at the evidence and the spectrogram,
 listened, and decided the file is as good as you can get. Typical cases:
 
 - a track with a *CD verified* badge: the file is a perfect copy of the CD, and
-  the CD itself carries the lossy traces;
+  the CD itself carries the lossy traces. The lists already leave these tracks
+  out unless the **CD check** filter is set to *Any*;
 - old tape or vinyl transfers whose high frequencies end in a natural roll-off;
 - lo-fi music that is band-limited on purpose.
 

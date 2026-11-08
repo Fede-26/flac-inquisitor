@@ -136,6 +136,18 @@ def test_accuracy_page_lists_cd_verified_tracks_flagged_anyway(client):
     assert "03. Fake.flac" in client.get("/accuracy").text
 
 
+def test_lists_leave_cd_verified_tracks_out_by_default(client):
+    scan(client)
+    with db.connect() as conn:
+        conn.execute("UPDATE tracks SET cd_status = 'verified'")
+    assert client.get("/api/tracks").json()["total"] == 0
+    assert client.get("/api/albums").json()["total"] == 0
+    assert client.get("/api/tracks?cd=").json()["total"] == 1
+    assert client.get("/api/tracks?cd=verified").json()["total"] == 1
+    assert "03. Fake.flac" not in client.get("/tracks").text
+    assert "03. Fake.flac" in client.get("/tracks?cd=").text
+
+
 def test_upsampled_setting_regrades_stored_verdicts(client, samples):
     album = db.DATA_PATH.parent / "music" / "Artist" / "Album"
     shutil.copy(samples["upsampled"], album / "04. Upsampled.flac")

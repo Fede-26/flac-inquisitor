@@ -115,7 +115,8 @@ Later scans are fast: they only analyze new or changed files.
 
 When the scan is done, the Dashboard shows counters:
 
-- **fake tracks** and **suspect tracks**: files the checks flagged.
+- **fake tracks** and **suspect tracks**: files the checks flagged. The lists
+  they link to leave out the ones that are verified CD rips.
 - **albums to review**: albums with at least one flagged track.
 - **tracks verified as CD rips**: files bit-identical to a pressed CD.
 - **By cause**: flagged tracks per category, such as *Lossy transcode* or
