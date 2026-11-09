@@ -108,3 +108,7 @@ keeps both. The Albums and Tracks lists leave verified CD rips out by default,
 since no other copy of that edition can be better; the Dashboard counters, the
 album pages and the Accuracy page still include them. The Accuracy page uses
 the overlap to find checks that are too strict.
+
+To make them count as OK everywhere, ignore them all from the Accuracy page
+(see [Mark a false positive](../how-to/false-positives.md)). The Accuracy page
+keeps grading them with the verdict of the checks.

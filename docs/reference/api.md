@@ -64,7 +64,7 @@ Scan status fields: `state` (`idle`, `running`, `stopping`), `phase`
 | `GET /api/tracks/{id}` | One track with `evidence`, `album_evidence`, `metrics`, `effective_verdict`, `ignored` and the CD columns. 404 if unknown. |
 | `GET /api/tracks/{id}/spectrogram.png?width=&height=` | Spectrogram image. Defaults 1200 × 480, at most 2400 × 1200. Cached on disk. |
 | `GET /api/tracks/{id}/audio` | The FLAC file, for the player. |
-| `GET /api/accuracy` | Accuracy report: `tracks`, `albums`, `outdated`, `by_verdict`, `checks`, `metrics`, `flagged`. |
+| `GET /api/accuracy` | Accuracy report: `tracks`, `albums`, `outdated`, `ignored`, `by_verdict`, `checks`, `metrics`, `flagged`. Verdicts are those of the checks, also for ignored tracks. |
 | `GET /api/activity?limit=50` | Recent activity, newest first, at most 500. |
 
 ## Actions
@@ -72,6 +72,7 @@ Scan status fields: `state` (`idle`, `running`, `stopping`), `phase`
 | Method and path | Body | Result |
 |---|---|---|
 | `POST /api/ignore` | `{"track_ids": [1, 2], "ignore": true, "note": null}` | Ignores (or with `ignore: false`, un-ignores) the tracks by audio MD5. Returns `{"changed": n}`. |
+| `POST /api/ignore/cd-verified` | none | Ignores every CD-verified track, ok ones included, with the note `CD verified`. Returns `{"changed": n}`, the number of tracks newly ignored. |
 | `POST /api/albums/{album_key}/offset-search` | — | Starts an offset search for the album. 400 if no disc of the album is in `mismatch`; 409 if a job is running. |
 | `POST /api/quarantine` | `{"track_ids": [...]}` or `{"album_keys": [...]}` | Moves the tracks (with sidecars) or whole album folders to the quarantine. Returns `batch`, `moved`, `tracks`, `errors`, `entry_ids`, `album_dirs`. 409 during a scan. |
 | `GET /api/quarantine?status=quarantined` | — | Quarantine entries grouped by album. |

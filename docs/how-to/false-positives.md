@@ -18,6 +18,18 @@ evidence, with an *ignored* tag next to the verdict.
 - In the **Albums** or **Tracks** list, tick rows and press **Ignore** in the
   bar above the list. For albums, every track of the album is ignored.
 
+## Ignore every CD-verified track
+
+A *CD verified* track is a perfect copy of a pressed CD, so no other copy of
+that edition can be better. To ignore all of them at once, open **Accuracy** and
+press **Ignore every CD-verified track**. The ok ones are ignored too, so a
+later version of the checks cannot flag them.
+
+The button acts on the tracks verified so far. Tracks verified by a later scan
+are not ignored by themselves: press it again after that scan. The Accuracy
+page keeps showing the verdicts of the checks on ignored tracks, so it still
+shows how the thresholds fare.
+
 ## Undo
 
 Open the track and press **Stop ignoring**. It gets its verdict back at once.
@@ -41,7 +53,8 @@ listened, and decided the file is as good as you can get. Typical cases:
 
 - a track with a *CD verified* badge: the file is a perfect copy of the CD, and
   the CD itself carries the lossy traces. The lists already leave these tracks
-  out unless the **CD check** filter is set to *Any*;
+  out unless the **CD check** filter is set to *Any*, and they can be ignored
+  all at once (see above);
 - old tape or vinyl transfers whose high frequencies end in a natural roll-off;
 - lo-fi music that is band-limited on purpose.
 

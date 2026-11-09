@@ -136,6 +136,19 @@ def test_accuracy_page_lists_cd_verified_tracks_flagged_anyway(client):
     assert "03. Fake.flac" in client.get("/accuracy").text
 
 
+def test_ignoring_cd_verified_tracks_keeps_the_accuracy_report(client):
+    scan(client)
+    with db.connect() as conn:
+        conn.execute("UPDATE tracks SET cd_status = 'verified' WHERE path LIKE '%Fake.flac' OR path LIKE '%Real.flac'")
+    assert client.post("/api/ignore/cd-verified").json() == {"changed": 2}
+    assert client.post("/api/ignore/cd-verified").json() == {"changed": 0}
+    assert client.get("/api/summary").json()["ignored"] == 2
+    assert client.get("/api/tracks?cd=").json()["total"] == 0
+    report = client.get("/api/accuracy").json()
+    assert report["ignored"] == 2 and report["by_verdict"]["fake"] == 1
+    assert [t["name"] for t in report["flagged"]] == ["03. Fake.flac"]
+
+
 def test_lists_leave_cd_verified_tracks_out_by_default(client):
     scan(client)
     with db.connect() as conn:

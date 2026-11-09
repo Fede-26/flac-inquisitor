@@ -19,11 +19,14 @@ so the hi-res and bit-depth padding checks are not covered.</p>
 {% else %}
 <div class="grid">
   <a class="sheet stat" href="/tracks?verdict=all&cd=verified"><div class="value">{{ report.tracks }}</div><div class="label">CD-verified tracks in {{ report.albums }} album{{ "" if report.albums == 1 else "s" }}</div></a>
-  <a class="sheet stat" href="/tracks?verdict=ok&cd=verified"><div class="value">{{ report.by_verdict.ok }}</div><div class="label">judged OK</div></a>
-  <a class="sheet stat suspect" href="/tracks?verdict=suspect&cd=verified"><div class="value">{{ report.by_verdict.suspect }}</div><div class="label">judged suspect</div></a>
-  <a class="sheet stat fake" href="/tracks?verdict=fake&cd=verified"><div class="value">{{ report.by_verdict.fake }}</div><div class="label">judged fake</div></a>
+  <div class="sheet stat"><div class="value">{{ report.by_verdict.ok }}</div><div class="label">judged OK</div></div>
+  <a class="sheet stat suspect" href="#flagged"><div class="value">{{ report.by_verdict.suspect }}</div><div class="label">judged suspect</div></a>
+  <a class="sheet stat fake" href="#flagged"><div class="value">{{ report.by_verdict.fake }}</div><div class="label">judged fake</div></a>
 </div>
 {% if report.outdated %}<p class="muted">{{ report.outdated }} of these tracks were analyzed by an older version of the checks: run a scan to bring them up to date.</p>{% endif %}
+<p class="muted">The verdicts on this page are those of the checks, even for ignored tracks.
+{{ report.ignored }} of the {{ report.tracks }} CD-verified tracks are ignored.</p>
+<p><button data-ignore-cd-verified {% if report.ignored == report.tracks %}disabled{% endif %}>Ignore every CD-verified track</button></p>
 
 <h2>Checks that raised an alarm</h2>
 {% if report.checks %}
@@ -60,7 +63,7 @@ rest. "Beyond" counts the CD-verified tracks on the wrong side of each threshold
 </table>
 </div>
 
-<h2>CD-verified tracks judged fake or suspect</h2>
+<h2 id="flagged">CD-verified tracks judged fake or suspect</h2>
 {% if report.flagged %}
 <div class="sheet" style="padding:0">
 <table class="cards">
@@ -70,7 +73,7 @@ rest. "Beyond" counts the CD-verified tracks on the wrong side of each threshold
     <tr>
       <td class="title-cell"><a href="/albums/{{ t.album_key }}#track-{{ t.id }}">{{ t.title or t.name }}</a>
         <div class="sub">{{ t.artist or '' }}{% if t.album %} · {{ t.album }}{% endif %}</div></td>
-      <td data-label="Verdict">{{ pill(t.eff) }}</td>
+      <td data-label="Verdict">{{ pill(t.checked) }}{% if t.ignored %} <span class="tag plain">ignored</span>{% endif %}</td>
       <td data-label="Why">{{ t.summary }}</td>
     </tr>
   {% endfor %}
@@ -80,3 +83,4 @@ rest. "Beyond" counts the CD-verified tracks on the wrong side of each threshold
 {% else %}<p>None.</p>{% endif %}
 {% endif %}
 {% endblock %}
+{% block scripts %}<script>FI.accuracy();</script>{% endblock %}

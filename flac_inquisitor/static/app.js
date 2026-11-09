@@ -533,6 +533,21 @@ const FI = (() => {
     for (const d of $$("details")) d.addEventListener("toggle", () => { if (d.open) loadImages(d); });
   }
 
+  function accuracy() {
+    $("[data-ignore-cd-verified]")?.addEventListener("click", async () => {
+      if (!await confirmDialog({
+        title: "Ignore every CD-verified track?",
+        body: "They will count as OK everywhere except on this page. Tracks verified by later scans are not ignored by themselves; press this button again. Each track can be un-ignored from its album page.",
+        ok: "Ignore",
+      })) return;
+      try {
+        const { data } = await api("POST", "/api/ignore/cd-verified");
+        toast(`Ignoring ${data.changed} more track(s).`);
+        setTimeout(() => location.reload(), 600);
+      } catch (e) { toast(e.message, { error: true }); }
+    });
+  }
+
   function settings() {
     const form = $("[data-settings]");
     const report = $("[data-report]");
@@ -586,5 +601,5 @@ const FI = (() => {
   }
 
   initCommon();
-  return { dashboard, library, album, quarantine, settings, api, toast };
+  return { dashboard, library, album, quarantine, accuracy, settings, api, toast };
 })();

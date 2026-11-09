@@ -239,10 +239,13 @@ def _quantiles(values: list[float], tail: str) -> list[tuple[str, float]]:
 
 
 def accuracy() -> dict:
+    # The verdict of the checks, not the effective one: verified tracks are
+    # usually ignored, and the report is about what the checks say.
     with db.connect() as conn:
         rows = [db.row_to_dict(r) for r in conn.execute(
-            f"SELECT t.id, t.path, t.album_key, t.title, t.artist, t.album, t.verdict, t.summary, t.evidence, "
-            f"t.metrics, t.cd_ar, t.cd_ctdb, t.algo_version, {EFFECTIVE} AS eff {BASE} "
+            "SELECT t.id, t.path, t.album_key, t.title, t.artist, t.album, t.verdict, t.summary, t.evidence, "
+            "t.metrics, t.cd_ar, t.cd_ctdb, t.algo_version, COALESCE(t.final_verdict, t.verdict) AS checked, "
+            f"i.audio_md5 IS NOT NULL AS ignored {BASE} "
             "AND t.cd_status = 'verified' AND t.verdict IS NOT NULL ORDER BY t.path")]
     checks: dict[str, dict[str, int]] = {}
     for r in rows:
@@ -259,12 +262,13 @@ def accuracy() -> dict:
                   for name, limit in thresholds]
         metrics.append({"key": key, "label": label, "unit": unit, "count": len(values),
                         "quantiles": _quantiles(values, tail), "beyond": beyond})
-    flagged = [{**r, "name": PurePosixPath(r["path"]).name} for r in rows if r["eff"] in ("fake", "suspect")]
+    flagged = [{**r, "name": PurePosixPath(r["path"]).name} for r in rows if r["checked"] in ("fake", "suspect")]
     return {
         "tracks": len(rows),
         "albums": len({r["album_key"] for r in rows}),
         "outdated": sum(r["algo_version"] != ALGO_VERSION for r in rows),
-        "by_verdict": {v: sum(r["eff"] == v for r in rows) for v in ("ok", "suspect", "fake")},
+        "ignored": sum(bool(r["ignored"]) for r in rows),
+        "by_verdict": {v: sum(r["checked"] == v for r in rows) for v in ("ok", "suspect", "fake")},
         "checks": sorted(checks.items(), key=lambda kv: -(kv[1]["warn"] + kv[1]["fail"])),
         "metrics": metrics,
         "flagged": flagged,

@@ -263,6 +263,20 @@ def api_ignore(body: IgnoreRequest) -> dict:
     return {"changed": len(md5s)}
 
 
+@app.post("/api/ignore/cd-verified")
+def api_ignore_cd_verified() -> dict:
+    # A verified track is a perfect copy of a pressed CD: no other copy of that
+    # edition can be better, so it is ignored whatever the checks say, ok
+    # tracks included, so that a later version of the checks does not flag it.
+    with db.connect() as conn:
+        changed = conn.execute(
+            "INSERT OR IGNORE INTO ignores (audio_md5, note, created_at) "
+            "SELECT DISTINCT audio_md5, 'CD verified', ? FROM tracks "
+            "WHERE missing = 0 AND cd_status = 'verified' AND audio_md5 IS NOT NULL", (db.now(),)).rowcount
+    db.log("ignore", f"Ignored {changed} CD-verified track(s).")
+    return {"changed": changed}
+
+
 class QuarantineRequest(BaseModel):
     track_ids: list[int] = []
     album_keys: list[str] = []

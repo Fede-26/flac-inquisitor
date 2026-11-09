@@ -82,6 +82,9 @@ The page lists:
 - the distribution of each measured value against its thresholds;
 - every CD-verified track judged fake or suspect.
 
+The verdicts are those of the checks, also for ignored tracks, so ignoring the
+CD-verified tracks does not empty the page.
+
 Many alarms from one check on CD-verified tracks mean that check is too strict
 for your music. [Recalibrate the thresholds](calibrate.md) explains what to do
 with that.
